@@ -1,3 +1,5 @@
 jsapi_gc.c
 jsapi.go
 jsapi_wrap.c
+*.6
+*.o
