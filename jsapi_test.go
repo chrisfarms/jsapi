@@ -151,7 +151,7 @@ func TestSleepContext(t *testing.T) {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	})
 
-	err := cx.Exec(`sleep(10)`)
+	err := cx.Exec(`sleep(1)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestOneContextManyGoroutines(t *testing.T) {
             defer wg.Done()
             for j := 0; j < 50; j++ {
 				var ok bool
-				err := cx.Eval(`snooze(5)`, &ok)
+				err := cx.Eval(`snooze(0)`, &ok)
 				if err != nil {
 					t.Error(err)
 					return

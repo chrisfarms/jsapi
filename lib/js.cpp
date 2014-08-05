@@ -207,7 +207,7 @@ void JSAPI_Init() {
 		printf("failed to init\n");
 	}
     // Create global runtime
-    grt = JS_NewRuntime(1024L * 1024L * 1024L, 0);
+    grt = JS_NewRuntime(2048L * 1024L * 1024L, 0);
     if (!grt) {
 		printf("failed to make global runtime\n");
 	}
