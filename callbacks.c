@@ -5,3 +5,4 @@ void Init(){
 	go_callback = callback;
 	go_error = reporter;
 }
+

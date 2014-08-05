@@ -258,3 +258,42 @@ func TestManyContextManyGoroutines(t *testing.T) {
 }
 
 
+func TestExecFile(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+	if err := cx.ExecFile("./jsapi_test.js"); err != nil {
+		t.Fatal(err)
+	}
+
+	var ok bool
+	if err := cx.Eval(`test()`, &ok); err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("expected test() function from jsapi_test.js file to return true got false")
+	}
+
+}
+
+func TestDeadlockCondition(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+	cx.DefineFunction("mkfun", func(){
+		cx.DefineFunction("dynamic", func() bool {
+			return true
+		})
+	})
+	if err := cx.Exec(`mkfun()`); err != nil {
+		t.Fatal(err)
+	}
+	var ok bool
+	if err := cx.Eval(`dynamic()`, &ok); err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal()
+	}
+
+}

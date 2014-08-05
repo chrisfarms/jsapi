@@ -14,6 +14,9 @@ import (
 	"runtime"
 	"encoding/json"
 	"sync"
+	"io"
+	"io/ioutil"
+	"os"
 )
 
 var jsapi *api
@@ -28,9 +31,13 @@ type api struct {
 }
 
 func (jsapi *api) do(callback func()) {
+	if C.JSAPI_ThreadCanAccessRuntime() == 1 {
+		callback()
+		return
+	}
 	fn := &fn{
 		call: callback,
-		done: make(chan bool),
+		done: make(chan bool, 1),
 	}
 	jsapi.in <- fn
 	<-fn.done
@@ -40,10 +47,12 @@ func start() *api {
 	jsapi := &api{
 		in: make(chan *fn),
 	}
+	ready := make(chan bool)
 	go func(){
 		runtime.LockOSThread()
 		C.Init()
 		C.JSAPI_Init()
+		ready <- true
 		for {
 			select {
 			case fn := <-jsapi.in:
@@ -53,6 +62,7 @@ func start() *api {
 		}
 
 	}()
+	<-ready
 	return jsapi
 }
 
@@ -193,8 +203,8 @@ func (cx *Context) getError(filename string) *ErrorReport {
 
 func (cx *Context) Destroy() {
 	if cx.Valid {
-		// lock
-		cx.lock(func(){
+		// do
+		cx.do(func(){
 			C.JSAPI_DestroyContext(cx.ptr)
 			cx.Valid = false
 			cx.ptr = nil
@@ -207,7 +217,7 @@ func (cx *Context) Exec(source string) (err error) {
 	if !cx.Valid {
 		return ErrContextDestroyed
 	}
-	cx.lock(func(){
+	cx.do(func(){
 		csource := C.CString(source)
 		defer C.free(unsafe.Pointer(csource))
 		filename := "eval"
@@ -232,7 +242,7 @@ func (cx *Context) Eval(source string, result interface{}) (err error) {
 	if !cx.Valid {
 		return ErrContextDestroyed
 	}
-	cx.lock(func(){
+	cx.do(func(){
 		// alloc C-string
 		csource := C.CString(source)
 		defer C.free(unsafe.Pointer(csource))
@@ -257,10 +267,29 @@ func (cx *Context) Eval(source string, result interface{}) (err error) {
 	return err
 }
 
+// Execute javascript in the context from an io.Reader.
+func (cx *Context) ExecFrom(r io.Reader) (err error) {
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return
+	}
+	return cx.Exec(string(b))
+}
+
+// Execute javascript in the context from a file
+func (cx *Context) ExecFile(filename string) (err error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return cx.ExecFrom(f)
+}
+
 // Define a javascript object in this Context
 func (cx *Context) DefineObject(name string) *Object {
 	o := NewObject()
-	cx.lock(func(){
+	cx.do(func(){
 		o.cx = cx
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
@@ -272,7 +301,7 @@ func (cx *Context) DefineObject(name string) *Object {
 
 func (cx *Context) DefineFunction(name string, fun interface{}) *Func {
 	f := NewFunc(fun)
-	cx.lock(func(){
+	cx.do(func(){
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
 		C.JSAPI_DefineFunction(cx.ptr, nil, cname)
@@ -284,14 +313,12 @@ func (cx *Context) DefineFunction(name string, fun interface{}) *Func {
 
 // Attempt to aquire mutex, then runs in primary thread.
 // panics if Context is invalid
-func (cx *Context) lock(fn func()) {
+func (cx *Context) do(fn func()) {
 	if !cx.Valid {
-		panic("attempt to lock a destroyed Context")
+		panic("attempt to do a destroyed Context")
 	}
-	cx.mu.Lock()
-	defer cx.mu.Unlock()
 	if !cx.Valid {
-		panic("context destroyed while waiting for lock")
+		panic("context destroyed while waiting for do")
 	}
 	jsapi.do(fn)
 }
@@ -325,7 +352,7 @@ func NewObject() *Object {
 
 func (o *Object) DefineFunction(name string, fun interface{}) *Func {
 	f := NewFunc(fun)
-	o.cx.lock(func(){
+	o.cx.do(func(){
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
 		// define

@@ -202,6 +202,7 @@ void* JSAPI_DefineFunction(JSAPIContext *c, void *o, char *name){
 static JSRuntime *grt = NULL;
 static JSContext *gcx = NULL;
 
+// Inits the js runtime and returns the thread id it's running on
 void JSAPI_Init() {
     if (!JS_Init()){
 		printf("failed to init\n");
@@ -211,6 +212,14 @@ void JSAPI_Init() {
     if (!grt) {
 		printf("failed to make global runtime\n");
 	}
+}
+
+int JSAPI_ThreadCanAccessRuntime() {
+	//if( rt->ownerThread_ == PR_GetCurrentThread()
+    if( CurrentThreadCanAccessRuntime(grt) ){
+		return 1;
+	}
+	return 0;
 }
 
 

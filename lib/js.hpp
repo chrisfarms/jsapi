@@ -8,6 +8,7 @@ extern "C" {
 
 #ifndef __cplusplus
 /* this is just for cgo */
+#include <inttypes.h>
 typedef struct {
 	void *rt;
 	void *cx;
@@ -25,6 +26,7 @@ GoFun go_callback;
 GoErr go_error;
 
 void JSAPI_Init();
+int JSAPI_ThreadCanAccessRuntime();
 JSAPIContext* JSAPI_NewContext();
 int JSAPI_DestroyContext(JSAPIContext *c);
 int JSAPI_EvalJSON(JSAPIContext *c, char *source, char *filename, char **outstr, int *outlen);
