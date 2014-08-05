@@ -24,6 +24,7 @@ typedef void (*GoErr)(JSAPIContext *c, const char *filename, unsigned int line, 
 GoFun go_callback;
 GoErr go_error;
 
+void JSAPI_Init();
 JSAPIContext* JSAPI_NewContext();
 int JSAPI_DestroyContext(JSAPIContext *c);
 int JSAPI_EvalJSON(JSAPIContext *c, char *source, char *filename, char **outstr, int *outlen);

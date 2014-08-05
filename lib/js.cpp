@@ -80,11 +80,19 @@ static const JSClass global_class = {
 };
 
 
-/* The error reporter callback. */
+// The error reporter callback.
 void reportError(JSContext *cx, const char *message, JSErrorReport *report) {
 	JSAPIContext *c = (JSAPIContext*)JS_GetContextPrivate(cx);
 	go_error(c, report->filename, (unsigned int)report->lineno, message);
 }
+
+// The OOM reporter
+void reportOOM(JSContext *cx, void *data) {
+	JSAPIContext *c = (JSAPIContext*)data;
+	fprintf(stderr, "spidermonkey has run out of memory!\n");
+	go_error(c, "__fatal__", 0, "spidermonkey ran out of memory"); 
+}
+
 
 
 void* JSAPI_DefineObject(JSAPIContext *c, void *o, char *name){
@@ -122,6 +130,7 @@ bool stringifier(const jschar *s, uint32_t n, void *data){
 
 bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 	JSAPIContext *c = (JSAPIContext*)JS_GetContextPrivate(cx);
+	//JS_AbortIfWrongThread(c->rt); //DEBUG
     JSAutoRequest ar(c->cx);
 	RootedObject global(c->cx, c->o);
 	JSAutoCompartment ac(c->cx, global);
@@ -190,20 +199,26 @@ void* JSAPI_DefineFunction(JSAPIContext *c, void *o, char *name){
 	return fun;
 }
 
+static JSRuntime *grt = NULL;
+static JSContext *gcx = NULL;
 
-JSAPIContext* JSAPI_NewContext(){
+void JSAPI_Init() {
     if (!JS_Init()){
 		printf("failed to init\n");
-		return 0;
 	}
+    // Create global runtime
+    grt = JS_NewRuntime(1024L * 1024L * 1024L, 0);
+    if (!grt) {
+		printf("failed to make global runtime\n");
+	}
+}
+
+
+JSAPIContext* JSAPI_NewContext(){
 	JSAPIContext *c = (JSAPIContext*)malloc(sizeof(JSAPIContext));
-    /* Create a JS runtime. */
-    c->rt = JS_NewRuntime(8L * 1024L * 1024L, 0);
-    if (!c->rt) {
-		printf("failed to make runtime\n");
-		return 0;
-	}
-    /* Create a context. */
+    // use global runtime
+    c->rt = grt;
+    // Create a new context
     c->cx = JS_NewContext(c->rt, 8192);
     if (!c->cx) {
 		printf("failed to make cx\n");
@@ -211,6 +226,7 @@ JSAPIContext* JSAPI_NewContext(){
 	}
 	/* Erros */
     JS_SetErrorReporter(c->cx, reportError);
+	JS::SetOutOfMemoryCallback(c->rt, reportOOM, c);
     /* Create the global object in a new compartment. */
     JSAutoRequest ar(c->cx);
     RootedObject global(c->cx, JS_NewGlobalObject(c->cx, &global_class, nullptr, JS::DontFireOnNewGlobalHook));
@@ -228,7 +244,10 @@ JSAPIContext* JSAPI_NewContext(){
 }
 
 int JSAPI_DestroyContext(JSAPIContext *c){
-	free(c);
+	if( c != NULL ){
+		JS_DestroyContext(c->cx);
+		free(c);
+	}
 	return 0;
 }
 

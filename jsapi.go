@@ -16,9 +16,50 @@ import (
 	"sync"
 )
 
-func init() {
-	C.Init()
+var jsapi *api
+
+type fn struct {
+	call func()
+	done chan bool
 }
+
+type api struct {
+	in chan *fn
+}
+
+func (jsapi *api) do(callback func()) {
+	fn := &fn{
+		call: callback,
+		done: make(chan bool),
+	}
+	jsapi.in <- fn
+	<-fn.done
+}
+
+func start() *api {
+	jsapi := &api{
+		in: make(chan *fn),
+	}
+	go func(){
+		runtime.LockOSThread()
+		C.Init()
+		C.JSAPI_Init()
+		for {
+			select {
+			case fn := <-jsapi.in:
+				fn.call()
+				fn.done <- true
+			}
+		}
+
+	}()
+	return jsapi
+}
+
+func init() {
+	jsapi = start()
+}
+
 
 var contexts = make(map[*C.JSAPIContext]*Context)
 
@@ -143,17 +184,21 @@ func (cx *Context) getError(filename string) *ErrorReport {
 		delete(cx.errs, filename)
 		return err
 	}
+	if err, ok := cx.errs["__fatal__"]; ok {
+		delete(cx.errs, filename)
+		return err
+	}
 	return nil
 }
 
 func (cx *Context) Destroy() {
-	if cx.Valid || cx.ptr == nil {
+	if cx.Valid {
 		// lock
-		cx.mu.Lock()
-		defer cx.mu.Unlock()
-		// destroy
-		C.JSAPI_DestroyContext(cx.ptr)
-		cx.Valid = false
+		cx.lock(func(){
+			C.JSAPI_DestroyContext(cx.ptr)
+			cx.Valid = false
+			cx.ptr = nil
+		})
 	}
 }
 
@@ -162,23 +207,22 @@ func (cx *Context) Exec(source string) (err error) {
 	if !cx.Valid {
 		return ErrContextDestroyed
 	}
-	// alloc C-strings
-	csource := C.CString(source)
-	defer C.free(unsafe.Pointer(csource))
-	filename := "eval"
-	cfilename := C.CString(filename)
-	defer C.free(unsafe.Pointer(cfilename))
-	// lock
-	cx.mu.Lock()
-	defer cx.mu.Unlock()
-	// eval
-	if C.JSAPI_Eval(cx.ptr, csource, cfilename) != C.JSAPI_OK {
-		if err := cx.getError(filename); err != nil {
-			return err
+	cx.lock(func(){
+		csource := C.CString(source)
+		defer C.free(unsafe.Pointer(csource))
+		filename := "eval"
+		cfilename := C.CString(filename)
+		defer C.free(unsafe.Pointer(cfilename))
+		// eval
+		if C.JSAPI_Eval(cx.ptr, csource, cfilename) != C.JSAPI_OK {
+			if err = cx.getError(filename); err != nil {
+				return
+			}
+			err = fmt.Errorf("Failed to exec javascript and no error report found")
+			return
 		}
-		return fmt.Errorf("Failed to exec javascript and no error report found")
-	}
-	return nil
+	})
+	return err
 }
 
 // Execute javascript source in Context and scan the response into result.
@@ -188,75 +232,81 @@ func (cx *Context) Eval(source string, result interface{}) (err error) {
 	if !cx.Valid {
 		return ErrContextDestroyed
 	}
-	// alloc C-string
-	csource := C.CString(source)
-	defer C.free(unsafe.Pointer(csource))
-	var jsonData *C.char
-	var jsonLen C.int
-	filename := "eval"
-	cfilename := C.CString(filename)
-	defer C.free(unsafe.Pointer(cfilename))
-	// lock
-	cx.mu.Lock()
-	defer cx.mu.Unlock()
-	// eval
-	if C.JSAPI_EvalJSON(cx.ptr, csource, cfilename, &jsonData, &jsonLen) != C.JSAPI_OK {
-		if err := cx.getError(filename); err != nil {
-			return err
+	cx.lock(func(){
+		// alloc C-string
+		csource := C.CString(source)
+		defer C.free(unsafe.Pointer(csource))
+		var jsonData *C.char
+		var jsonLen C.int
+		filename := "eval"
+		cfilename := C.CString(filename)
+		defer C.free(unsafe.Pointer(cfilename))
+		// eval
+		if C.JSAPI_EvalJSON(cx.ptr, csource, cfilename, &jsonData, &jsonLen) != C.JSAPI_OK {
+			if err = cx.getError(filename); err != nil {
+				return
+			}
+			err = fmt.Errorf("Failed to eval javascript and no error report found")
+			return
 		}
-		return fmt.Errorf("Failed to eval javascript and no error report found")
-	}
-	defer C.free(unsafe.Pointer(jsonData))
-	// convert to go
-	b := []byte(C.GoStringN(jsonData, jsonLen))
-	err = json.Unmarshal(b, result)
-	if err != nil {
-		return err
-	}
-	return nil
+		defer C.free(unsafe.Pointer(jsonData))
+		// convert to go
+		b := []byte(C.GoStringN(jsonData, jsonLen))
+		err = json.Unmarshal(b, result)
+	})
+	return err
 }
 
 // Define a javascript object in this Context
 func (cx *Context) DefineObject(name string) *Object {
 	o := NewObject()
-	o.cx = cx
-	cname := C.CString(name)
-	defer C.free(unsafe.Pointer(cname))
-	// lock
-	cx.mu.Lock()
-	defer cx.mu.Unlock()
-	// define
-	o.ptr = C.JSAPI_DefineObject(cx.ptr, nil, cname)
-	cx.objs[o.ptr] = o
+	cx.lock(func(){
+		o.cx = cx
+		cname := C.CString(name)
+		defer C.free(unsafe.Pointer(cname))
+		o.ptr = C.JSAPI_DefineObject(cx.ptr, nil, cname)
+		cx.objs[o.ptr] = o
+	})
 	return o
 }
 
 func (cx *Context) DefineFunction(name string, fun interface{}) *Func {
 	f := NewFunc(fun)
-	cname := C.CString(name)
-	defer C.free(unsafe.Pointer(cname))
-	// lock
-	cx.mu.Lock()
-	defer cx.mu.Unlock()
-	// define
-	C.JSAPI_DefineFunction(cx.ptr, nil, cname)
-	cx.funcs[name] = f
-	f.Name = name
+	cx.lock(func(){
+		cname := C.CString(name)
+		defer C.free(unsafe.Pointer(cname))
+		C.JSAPI_DefineFunction(cx.ptr, nil, cname)
+		cx.funcs[name] = f
+		f.Name = name
+	})
 	return f
 }
 
-func NewContext() *Context {
-	cx := &Context{}
-	// lock
+// Attempt to aquire mutex, then runs in primary thread.
+// panics if Context is invalid
+func (cx *Context) lock(fn func()) {
+	if !cx.Valid {
+		panic("attempt to lock a destroyed Context")
+	}
 	cx.mu.Lock()
 	defer cx.mu.Unlock()
-	// create
-	cx.ptr = C.JSAPI_NewContext()
-	cx.Valid = true
-	cx.objs = make(map[unsafe.Pointer]*Object)
-	cx.funcs = make(map[string]*Func)
-	contexts[cx.ptr] = cx
-	runtime.SetFinalizer(cx, finalizer)
+	if !cx.Valid {
+		panic("context destroyed while waiting for lock")
+	}
+	jsapi.do(fn)
+}
+
+
+func NewContext() *Context {
+	cx := &Context{}
+	jsapi.do(func(){
+		cx.ptr = C.JSAPI_NewContext()
+		cx.Valid = true
+		cx.objs = make(map[unsafe.Pointer]*Object)
+		cx.funcs = make(map[string]*Func)
+		contexts[cx.ptr] = cx
+		runtime.SetFinalizer(cx, finalizer)
+	})
 	return cx
 }
 
@@ -275,15 +325,14 @@ func NewObject() *Object {
 
 func (o *Object) DefineFunction(name string, fun interface{}) *Func {
 	f := NewFunc(fun)
-	cname := C.CString(name)
-	defer C.free(unsafe.Pointer(cname))
-	// lock
-	o.cx.mu.Lock()
-	defer o.cx.mu.Unlock()
-	// define
-	C.JSAPI_DefineFunction(o.cx.ptr, o.ptr, cname)
-	o.funcs[name] = f
-	f.Name = name
+	o.cx.lock(func(){
+		cname := C.CString(name)
+		defer C.free(unsafe.Pointer(cname))
+		// define
+		C.JSAPI_DefineFunction(o.cx.ptr, o.ptr, cname)
+		o.funcs[name] = f
+		f.Name = name
+	})
 	return f
 }
 

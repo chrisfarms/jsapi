@@ -204,17 +204,53 @@ func TestOneContextManyGoroutines(t *testing.T) {
     for i := 0; i < 100; i++ {
         wg.Add(1)
         go func() {
-            for j := 0; j < 100; j++ {
+            defer wg.Done()
+            for j := 0; j < 50; j++ {
 				var ok bool
-				err := cx.Eval(`snooze(1)`, &ok)
+				err := cx.Eval(`snooze(5)`, &ok)
 				if err != nil {
-					panic(err)
+					t.Error(err)
+					return
 				}
 				if !ok {
-					panic("expected ok response")
+					t.Errorf("expected ok response")
+					return
 				}
             }
-            wg.Done()
+        }()
+    }
+    wg.Wait()
+
+}
+
+func TestManyContextManyGoroutines(t *testing.T) {
+
+	runtime.GOMAXPROCS(20)
+
+    wg := new(sync.WaitGroup)
+    for i := 0; i < 100; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+			cx := NewContext()
+			defer cx.Destroy()
+
+			cx.DefineFunction("snooze", func(ms int) bool {
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+				return true
+			})
+            for j := 0; j < 50; j++ {
+				var ok bool
+				err := cx.Eval(`snooze(0)`, &ok)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if !ok {
+					t.Errorf("expected ok response")
+					return
+				}
+			}
         }()
     }
     wg.Wait()
