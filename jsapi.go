@@ -1,9 +1,7 @@
 package jsapi
 
 /*
-#cgo !linux !amd64 LDFLAGS: -L./lib
-#cgo linux,amd64 LDFLAGS: -L./lib/linux_amd64
-#cgo LDFLAGS: -lmonk -l:libjs_static.a -lpthread -lstdc++ -ldl
+#cgo LDFLAGS: -L./lib -lmonk -l:libjs_static.a -lpthread -lstdc++ -ldl
 #include <stdlib.h>
 #include "lib/js.hpp"
 void Init();
