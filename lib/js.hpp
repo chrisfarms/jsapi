@@ -17,7 +17,7 @@ typedef struct {
 #endif
 
 typedef int (*GoFun)(JSAPIContext *c, void *o, char *name, char *s, int len, char **result);
-typedef void (*GoErr)(JSAPIContext *c, const char *filename, unsigned int line, const char *msg);
+typedef void (*GoErr)(JSAPIContext *c, char *filename, unsigned int line, char *msg);
 
 #define JSAPI_OK 0
 #define JSAPI_FAIL 1

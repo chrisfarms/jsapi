@@ -83,7 +83,7 @@ static const JSClass global_class = {
 // The error reporter callback.
 void reportError(JSContext *cx, const char *message, JSErrorReport *report) {
 	JSAPIContext *c = (JSAPIContext*)JS_GetContextPrivate(cx);
-	go_error(c, report->filename, (unsigned int)report->lineno, message);
+	go_error(c, (char*)report->filename, (unsigned int)report->lineno, (char*)message);
 }
 
 // The OOM reporter
