@@ -1,8 +1,12 @@
 # JSAPI
 
+## Overview
+
 JSAPI is a Go ([golang](http://golang.org)) package for embedding the spidermonkey javascript interpreter into your Go projects.
 
 ## Example
+
+Here is a quick example of exposing a simple Go function to javascript, calling the function and printing the resulting value out.
 
 ```go
 package main
@@ -21,24 +25,21 @@ func main() {
 	})
 	
 	var result int
-	cx.Eval(`add(1,2)`, &result); err != nil {
+	cx.Eval(`add(1,2)`, &result)
 
 	fmt.Println("result is", result)
 }
 ```
 
+## Documentation
+
+See godoc for API documentation.
+
 ## Installation
 
-### Prerequisites
+If you are running on a *linux x86_64* architecture then you may be able to take advantage of the bundled binaries and get away with installing the `jsapi` package just as you would any other Go package by adding the import path `github.com/chrisfarms/jsapi` to your project and using `go get` or `go install`
 
-* Go 1.3 (plus any requirements for cgo)
-* gcc
-
-### The lucky few
-
-If you are running on a linux x86_64 architecture then you may be able to take advantage of the bundled binaries and get away with installing the `jsapi` package just as you would any other Go package by adding the import path `github.com/chrisfarms/jsapi` to your project and using `go get` or `go install`
-
-## Everyone else
+For everyone else...
 
 Since this package relies on a C/C++ library that steps outside the realm of the `go` tool's capabilities you will have to perform some extra steps to get it to build.
 
@@ -56,8 +57,6 @@ If all went well the package should now be installed in your `GOPATH` ready to b
 ```go
 import "github.com/chrisfarms/jsapi"
 ```
-
-
 
 
 
