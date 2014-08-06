@@ -1,53 +1,68 @@
 # JSAPI
 
-JSAPI is a Go ([golang](http://golang.org)) package for embedding the spidermonkey javascript interpreter into your Go programs.
+JSAPI is a Go ([golang](http://golang.org)) package for embedding the spidermonkey javascript interpreter into your Go projects.
 
 ## Example
 
 ```go
-	package main
+package main
 
-	import( 
-		"fmt"
-		"github.com/chrisfarms/jsapi"
-	)
+import( 
+	"fmt"
+	"github.com/chrisfarms/jsapi"
+)
 
-	func main() {
+func main() {
 
-		cx := jsapi.NewContext()
+	cx := jsapi.NewContext()
 
-		cx.DefineFunction("add", func(a, b int) int {
-			return a + b
-		})
-		
-		var result int
-		cx.Eval(`add(1,2)`, &result); err != nil {
+	cx.DefineFunction("add", func(a, b int) int {
+		return a + b
+	})
+	
+	var result int
+	cx.Eval(`add(1,2)`, &result); err != nil {
 
-		fmt.Println("result is", result)
-	}
+	fmt.Println("result is", result)
+}
 ```
 
 ## Installation
 
 ### Prerequisites
 
-* Go 1.3
+* Go 1.3 (plus any requirements for cgo)
 * gcc
 
-### If you are running an x86_64 architecture
+### The lucky few
 
-If you are running on x86_64 architecture then you should be able to take advantage of the bundled binaries and get away with installing the `jsapi` package just as you would any other Go package by adding the import path `github.com/chrisfarms/jsapi` to your project and using `go get`
+If you are running on a linux x86_64 architecture then you may be able to take advantage of the bundled binaries and get away with installing the `jsapi` package just as you would any other Go package by adding the import path `github.com/chrisfarms/jsapi` to your project and using `go get` or `go install`
+
+## Everyone else
+
+Since this package relies on a C/C++ library that steps outside the realm of the `go` tool's capabilities you will have to perform some extra steps to get it to build.
+
+First ensure that you have your `GOPATH` configured to something suitable, then fetch and build it manually using the following steps:
 
 ```sh
-	go get github.com/chrisfarms/jsapi
+mkdir -p $GOPATH/src/github.com/chrisfarms/jsapi
+cd $GOPATH/src/github.com/chrisfarms/jsapi
+git clone --recursive https://github.com/chrisfarms/jsapi.git "."
+./make.sh
 ```
 
-## For everyone else
+If all went well the package should now be installed in your `GOPATH` ready to be imported in your project via:
 
-Since this package relies on linking 
+```go
+import "github.com/chrisfarms/jsapi"
+```
 
 
 
 
 
-LD_LIBRARY_PATH=/home/chrisfarms/src/github.com/chrisfarms/monkey/mozilla-central/js/src/build-release/dist/lib; (cd lib && g++ -fPIC -c -std=c++11 -Wno-write-strings -Wno-invalid-offsetof -include /home/chrisfarms/src/github.com/chrisfarms/monkey/mozilla-central/js/src/build-release/dist/include/js/RequiredDefines.h -I/home/chrisfarms/src/github.com/chrisfarms/monkey/mozilla-central/js/src/build-release/dist/include/ -I/home/chrisfarms/src/github.com/chrisfarms/monkey/mozilla-central/js/src -o monk.o js.cpp && ar rvs libmonk.a monk.o) && go build && go test
+
+
+
+
+

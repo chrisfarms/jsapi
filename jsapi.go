@@ -1,7 +1,7 @@
 package jsapi
 
 /*
-#cgo LDFLAGS: -L./lib -lmonk -L./lib/moz/js/src/build-release/dist/lib -l:libjs_static.a -lpthread -lstdc++ -ldl
+#cgo LDFLAGS: -L./lib -lmonk -l:libjs_static.a -lpthread -lstdc++ -ldl
 #include <stdlib.h>
 #include "lib/js.hpp"
 void Init();
