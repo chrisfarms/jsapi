@@ -99,6 +99,29 @@ func TestObjectWithIntFunction(t *testing.T) {
 
 }
 
+func TestNestedObjects(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	parent := cx.DefineObject("parent", nil)
+	child := parent.DefineObject("child", nil)
+
+	child.DefineFunction("greet", func() string {
+		return "hello"
+	})
+
+	var s string
+	err := cx.Eval(`parent.child.greet()`, &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s != "hello" {
+		t.Fatalf(`expected parent.child.greet() to return "hello" but got %s`, s)
+	}
+
+}
+
 func TestObjectWithVaridicFunction(t *testing.T) {
 
 	cx := NewContext()
@@ -211,12 +234,29 @@ func TestObjectProperties(t *testing.T) {
 		t.Fatalf(`expected to get value of person.Name (%q) from js but got %q`, person.Name, s)
 	}
 
-	err = cx.Eval(`o.Name = "geoff"`, &s)
+	err = cx.Exec(`o.Name = "geoff"`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if person.Name != "geoff"{
 		t.Fatalf(`expected to set value of person.Name to "geoff" but got %q`, person.Name)
+	}
+
+	var i int
+	err = cx.Eval(`o.Age`, &i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i != person.Age {
+		t.Fatalf(`expected to get value of person.Age (%d) from js but got %v`, person.Age, i)
+	}
+
+	err = cx.Exec(`o.Age = 25`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if person.Age != 25 {
+		t.Fatalf(`expected to set value of person.Age to 25 but got %v`, person.Age)
 	}
 
 }

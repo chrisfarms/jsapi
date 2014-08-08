@@ -331,6 +331,10 @@ func (cx *Context) ExecFile(filename string) (err error) {
 // 
 // 
 func (cx *Context) DefineObject(name string, proxy interface{}) *Object {
+	return cx.defineObject(name, proxy, nil)
+}
+
+func (cx *Context) defineObject(name string, proxy interface{}, id *C.JSObject) *Object {
 	o := &Object{}
 	o.funcs = make(map[string]*Func)
 	o.props = make(map[string]*prop)
@@ -338,7 +342,7 @@ func (cx *Context) DefineObject(name string, proxy interface{}) *Object {
 	cx.do(func(){
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
-		o.id = C.JSAPI_DefineObject(cx.ptr, nil, cname)
+		o.id = C.JSAPI_DefineObject(cx.ptr, id, cname)
 		cx.objs[o.id] = o
 		if proxy != nil {
 			o.proxy = proxy
@@ -423,6 +427,10 @@ func (o *Object) DefineFunction(name string, fun interface{}) *Func {
 	f := o.cx.defineFunction(name, fun, o.id)
 	o.funcs[f.Name] = f
 	return f
+}
+
+func (o *Object) DefineObject(name string, proxy interface{}) *Object {
+	return o.cx.defineObject(name, proxy, o.id)
 }
 
 type Func struct {
