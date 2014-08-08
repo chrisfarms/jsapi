@@ -1,7 +1,7 @@
 package jsapi
 
 /*
-#cgo LDFLAGS: -L./lib -lmonk -l:libjs_static.a -lpthread -lstdc++ -ldl
+#cgo LDFLAGS: -L./lib -ljsapi -l:libjs.a -lpthread -lstdc++ -ldl
 #include <stdlib.h>
 #include "lib/js.hpp"
 void Init();
@@ -31,7 +31,7 @@ type api struct {
 }
 
 func (jsapi *api) do(callback func()) {
-	if C.JSAPI_ThreadCanAccessRuntime() == 1 {
+	if C.JSAPI_ThreadCanAccessRuntime() == C.JSAPI_OK {
 		callback()
 		return
 	}
@@ -51,7 +51,9 @@ func start() *api {
 	go func(){
 		runtime.LockOSThread()
 		C.Init()
-		C.JSAPI_Init()
+		if C.JSAPI_Init() != C.JSAPI_OK {
+			panic("could not init JSAPI runtime")
+		}
 		ready <- true
 		for {
 			select {
@@ -73,14 +75,7 @@ func init() {
 
 var contexts = make(map[*C.JSAPIContext]*Context)
 
-type jsapiError int
 
-var(
-	ErrRuntimeDestroyed jsapiError = 100
-	ErrContextDestroyed jsapiError = 200
-	ErrObjectDestroyed jsapiError = 300
-	ErrFunctionDestroyed jsapiError = 400
-)
 
 type destroyer interface {
 	Destroy()
@@ -90,23 +85,8 @@ func finalizer(x destroyer){
 	x.Destroy()
 }
 
-func (err jsapiError) Error() string {
-	switch err {
-	case ErrRuntimeDestroyed:
-		return "referenced runtime has been destroyed"
-	case ErrContextDestroyed:
-		return "referenced context has been destroyed"
-	case ErrObjectDestroyed:
-		return "referenced module has been destroyed"
-	case ErrFunctionDestroyed:
-		return "referenced function has been destroyed"
-	default:
-		return fmt.Sprintf("unknown jsapi error: %d", err)
-	}
-}
-
 //export callback
-func callback(c *C.JSAPIContext, ptr unsafe.Pointer, cname *C.char, args *C.char, argn C.int, out **C.char) C.int {
+func callback(c *C.JSAPIContext, id *C.JSObject, cname *C.char, args *C.char, argn C.int, out **C.char) C.int {
 	cx, ok := contexts[c]
 	if !ok {
 		*out = C.CString("attempt to use context after destroyed")
@@ -114,16 +94,17 @@ func callback(c *C.JSAPIContext, ptr unsafe.Pointer, cname *C.char, args *C.char
 	}
 	name := C.GoString(cname)
 	var fn *Func
-	if ptr == cx.ptr.o {
+	if id == c.o {
 		fn, ok = cx.funcs[name]
 		if !ok {
 			*out = C.CString("attempt to use global func that doesn't appear to exist")
 			return 0
 		}
 	} else {
-		o, ok := cx.objs[ptr]
+		o, ok := cx.objs[id]
 		if !ok {
-			*out = C.CString("attempt to use object that doesn't appear to exist")
+			fmt.Println("obj=", id)
+			*out = C.CString("attempt to use global object that doesn't appear to exist")
 			return 0
 		}
 		fn, ok = o.funcs[name]
@@ -151,6 +132,60 @@ func reporter(c *C.JSAPIContext, cfilename *C.char, lineno C.uint, cmsg *C.char)
 	cx.setError(C.GoString(cfilename), uint(lineno), C.GoString(cmsg))
 }
 
+//export getprop
+func getprop(c *C.JSAPIContext, id *C.JSObject, cname *C.char, out **C.char) C.int {
+	cx, ok := contexts[c]
+	if !ok {
+		*out = C.CString("attempt to use context after destroyed")
+		return 0
+	}
+	o, ok := cx.objs[id]
+	if !ok {
+		fmt.Println("bad object id", id)
+		*out = C.CString("attempt to use object that doesn't appear to exist")
+		return 0
+	}
+	p, ok := o.props[C.GoString(cname)]
+	if !ok {
+		*out = C.CString("attempt to get property that doesn't appear to exist")
+		return 0
+	}
+	outjson,err := p.get()
+	if err != nil {
+		*out = C.CString(err.Error())
+		return 0
+	}
+	*out = C.CString(outjson)
+	return 1
+}
+
+//export setprop
+func setprop(c *C.JSAPIContext, id *C.JSObject, cname *C.char, val *C.char, valn C.int, out **C.char) C.int {
+	cx, ok := contexts[c]
+	if !ok {
+		*out = C.CString("attempt to use context after destroyed")
+		return 0
+	}
+	o, ok := cx.objs[id]
+	if !ok {
+		*out = C.CString("attempt to use object that doesn't appear to exist")
+		return 0
+	}
+	p, ok := o.props[C.GoString(cname)]
+	if !ok {
+		*out = C.CString("attempt to set property that doesn't appear to exist")
+		return 0
+	}
+	json := C.GoStringN(val,valn)
+	outjson,err := p.set(json)
+	if err != nil {
+		*out = C.CString(err.Error())
+		return 0
+	}
+	*out = C.CString(outjson)
+	return 1
+}
+
 type ErrorReport struct {
 	Filename string
 	Line uint
@@ -166,9 +201,8 @@ func (err *ErrorReport) String() string {
 }
 
 type Context struct {
-	id int64
 	ptr *C.JSAPIContext
-	objs map[unsafe.Pointer]*Object
+	objs map[*C.JSObject]*Object
 	funcs map[string]*Func
 	Valid bool
 	errs map[string]*ErrorReport
@@ -214,9 +248,6 @@ func (cx *Context) Destroy() {
 
 // Execute javascript source in Context and discard any response
 func (cx *Context) Exec(source string) (err error) {
-	if !cx.Valid {
-		return ErrContextDestroyed
-	}
 	cx.do(func(){
 		csource := C.CString(source)
 		defer C.free(unsafe.Pointer(csource))
@@ -239,9 +270,6 @@ func (cx *Context) Exec(source string) (err error) {
 // Scanning follows the rules of json.Unmarshal so most go native types are
 // supported and complex javascript objects can be scanned by referancing structs.
 func (cx *Context) Eval(source string, result interface{}) (err error) {
-	if !cx.Valid {
-		return ErrContextDestroyed
-	}
 	cx.do(func(){
 		// alloc C-string
 		csource := C.CString(source)
@@ -286,26 +314,72 @@ func (cx *Context) ExecFile(filename string) (err error) {
 	return cx.ExecFrom(f)
 }
 
-// Define a javascript object in this Context
-func (cx *Context) DefineObject(name string) *Object {
-	o := NewObject()
+// Define a javascript object in the Context.
+// If proxy is nil, then an empty js object is created.
+//
+// cx.DefineObject("x", nil) // equivilent to x = {};
+//
+// If proxy references a struct type, then a two-way binding of all public 
+// fields within proxy the proxy object will be exposed to js via the 
+// created object.
+//
+// typedef Person {
+//     Name string
+// }
+//
+// 
+// 
+// 
+func (cx *Context) DefineObject(name string, proxy interface{}) *Object {
+	o := &Object{}
+	o.funcs = make(map[string]*Func)
+	o.props = make(map[string]*prop)
+	o.cx = cx
 	cx.do(func(){
-		o.cx = cx
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
-		o.ptr = C.JSAPI_DefineObject(cx.ptr, nil, cname)
-		cx.objs[o.ptr] = o
+		o.id = C.JSAPI_DefineObject(cx.ptr, nil, cname)
+		cx.objs[o.id] = o
+		if proxy != nil {
+			o.proxy = proxy
+			ov := reflect.ValueOf(proxy)
+			ot := ov.Type()
+			if ot.Kind() == reflect.Ptr {
+				ov = reflect.Indirect(ov)
+				ot = ov.Type()
+			}
+			if ot.Kind() != reflect.Struct {
+				panic("proxy object must be a kind of struct or pointer to a struct")
+			}
+			for i := 0; i<ot.NumField(); i++ {
+				f := ot.Field(i)
+				fv := ov.Field(i)
+				o.props[f.Name] = &prop{f.Name, fv, f.Type}
+				cpropname := C.CString(f.Name)
+				defer C.free(unsafe.Pointer(cpropname))
+				if C.JSAPI_DefineProperty(cx.ptr, o.id, cpropname) != C.JSAPI_OK {
+					panic("failed to define property")
+				}
+			}
+		}
 	})
 	return o
 }
 
 func (cx *Context) DefineFunction(name string, fun interface{}) *Func {
+	f := cx.defineFunction(name, fun, nil)
+	cx.funcs[f.Name] = f
+	return f
+}
+
+func (cx *Context) defineFunction(name string, fun interface{}, id *C.JSObject) *Func {
 	f := NewFunc(fun)
 	cx.do(func(){
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
-		C.JSAPI_DefineFunction(cx.ptr, nil, cname)
-		cx.funcs[name] = f
+		if C.JSAPI_DefineFunction(cx.ptr, id, cname) != C.JSAPI_OK {
+			panic("failed to define function")
+		}
 		f.Name = name
 	})
 	return f
@@ -329,7 +403,7 @@ func NewContext() *Context {
 	jsapi.do(func(){
 		cx.ptr = C.JSAPI_NewContext()
 		cx.Valid = true
-		cx.objs = make(map[unsafe.Pointer]*Object)
+		cx.objs = make(map[*C.JSObject]*Object)
 		cx.funcs = make(map[string]*Func)
 		contexts[cx.ptr] = cx
 		runtime.SetFinalizer(cx, finalizer)
@@ -338,28 +412,16 @@ func NewContext() *Context {
 }
 
 type Object struct {
-	id int64
+	id *C.JSObject
 	cx *Context
-	ptr unsafe.Pointer
 	funcs map[string]*Func
-}
-
-func NewObject() *Object {
-	o := &Object{}
-	o.funcs = make(map[string]*Func)
-	return o
+	props map[string]*prop
+	proxy interface{}
 }
 
 func (o *Object) DefineFunction(name string, fun interface{}) *Func {
-	f := NewFunc(fun)
-	o.cx.do(func(){
-		cname := C.CString(name)
-		defer C.free(unsafe.Pointer(cname))
-		// define
-		C.JSAPI_DefineFunction(o.cx.ptr, o.ptr, cname)
-		o.funcs[name] = f
-		f.Name = name
-	})
+	f := o.cx.defineFunction(name, fun, o.id)
+	o.funcs[f.Name] = f
 	return f
 }
 
@@ -425,14 +487,9 @@ func (f *Func) call(in string) (out string, err error) {
 		} else {
 			t = f.t.In(i)
 		}
-		if v.Type().Kind() == reflect.Ptr && t.Kind() != reflect.Ptr {
-			v = reflect.Indirect(v)
-		}
-		if !v.Type().AssignableTo(t) {
-			if !v.Type().ConvertibleTo(t) {
-				return "", fmt.Errorf("Invalid argument type: arg[%d] should be type %s but got %s", i, t.Kind(), v.Type().Kind())
-			}
-			v = v.Convert(t)
+		v, err = cast(v, t)
+		if err != nil {
+			return
 		}
 		invals[i] = v
 	}
@@ -452,5 +509,48 @@ func (f *Func) call(in string) (out string, err error) {
 		b,err := json.Marshal(outargs)
 		return string(b), err
 	}
+}
+
+// try to convert v to something that is assignable to type t
+func cast(v reflect.Value, t reflect.Type) (reflect.Value, error) {
+	if v.Type().Kind() == reflect.Ptr && t.Kind() != reflect.Ptr {
+		v = reflect.Indirect(v)
+	}
+	if !v.Type().AssignableTo(t) {
+		if !v.Type().ConvertibleTo(t) {
+			return v, fmt.Errorf("cannot cast %s to %s", v.Type().Kind(), t.Kind())
+		}
+		v = v.Convert(t)
+	}
+	return v, nil
+}
+
+// prop is a wrapper around a struct's field's refelction
+type prop struct {
+	name string
+	v reflect.Value
+	t reflect.Type
+}
+
+// get json for property
+func (p *prop) get() (string, error) {
+	b,err := json.Marshal(p.v.Interface())
+	return string(b), err
+}
+
+// set property via json
+func (p *prop) set(injson string) (string, error) {
+	var x interface{}
+	err := json.Unmarshal([]byte(injson), &x)
+	if err != nil {
+		return "", err
+	}
+	xv := reflect.ValueOf(x)
+	xv, err = cast(xv, p.t)
+	if !p.v.CanSet() {
+		return "", fmt.Errorf("property %s is not settable", p.name)
+	}
+	p.v.Set(xv)
+	return p.get()
 }
 

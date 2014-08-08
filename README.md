@@ -46,9 +46,10 @@ mkdir -p $GOPATH/src/github.com/chrisfarms/jsapi
 cd $GOPATH/src/github.com/chrisfarms/jsapi
 git clone --recursive https://github.com/chrisfarms/jsapi.git "."
 ./make.sh
+go install
 ```
 
-If all went well the package should now be installed in your `GOPATH` ready to be imported in your project via:
+If all went well you should see then `PASS` output from the test run and the package can now be installed by running `go install` and used as normal via:
 
 ```go
 import "github.com/chrisfarms/jsapi"

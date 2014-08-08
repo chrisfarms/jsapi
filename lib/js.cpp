@@ -58,6 +58,7 @@ struct JSAPIContext {
 #include <sstream>
 
 using namespace js;
+using namespace JS;
 
 using mozilla::ArrayLength;
 using mozilla::MakeUnique;
@@ -74,9 +75,9 @@ static const JSClass global_class = {
     JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub,
-    JS_ConvertStub,   nullptr,
-    nullptr, nullptr, nullptr,
-    JS_GlobalObjectTraceHook
+    JS_ConvertStub, nullptr,
+	nullptr, nullptr, nullptr,
+	JS_GlobalObjectTraceHook
 };
 
 
@@ -93,16 +94,14 @@ void reportOOM(JSContext *cx, void *data) {
 	go_error(c, "__fatal__", 0, "spidermonkey ran out of memory"); 
 }
 
-
-
-void* JSAPI_DefineObject(JSAPIContext *c, void *o, char *name){
-	if( o == NULL ){
-		o = c->o;
+JSObject* JSAPI_DefineObject(JSAPIContext *c, JSObject* parent, char *name){
+	if( parent == NULL ){
+		parent = c->o;
 	}
-    JSAutoRequest ar(c->cx);
-	RootedObject parent(c->cx, (JSObject*)o);
-    JSAutoCompartment ac(c->cx, parent);
-	JSObject *obj = JS_DefineObject(c->cx, parent, name, nullptr, JS::NullPtr(), 0);
+	JSAutoRequest ar(c->cx);
+	JSAutoCompartment ac(c->cx, c->o);
+	RootedObject p(c->cx, parent);
+	JSObject* obj = JS_DefineObject(c->cx, p, name, nullptr, JS::NullPtr(), 0);
 	return obj;
 }
 
@@ -115,8 +114,7 @@ struct jsonBuffer {
 bool stringifier(const jschar *s, uint32_t n, void *data){
 	jsonBuffer *buf = (jsonBuffer*)data;
     JSAutoRequest ar(buf->c->cx);
-	RootedObject global(buf->c->cx, buf->c->o);
-	JSAutoCompartment ac(buf->c->cx, global);
+	JSAutoCompartment ac(buf->c->cx, buf->c->o);
 	RootedString ss(buf->c->cx,JS_NewUCStringCopyN(buf->c->cx, s, n));
 	size_t sn = JS_GetStringEncodingLength(buf->c->cx, ss);
 	buf->str = (char*)realloc(buf->str, (buf->n + sn) * sizeof(char));
@@ -130,10 +128,8 @@ bool stringifier(const jschar *s, uint32_t n, void *data){
 
 bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 	JSAPIContext *c = (JSAPIContext*)JS_GetContextPrivate(cx);
-	//JS_AbortIfWrongThread(c->rt); //DEBUG
-    JSAutoRequest ar(c->cx);
-	RootedObject global(c->cx, c->o);
-	JSAutoCompartment ac(c->cx, global);
+	JSAutoRequest ar(c->cx);
+	JSAutoCompartment ac(c->cx, c->o);
 	// get name
 	JS::CallReceiver rec = JS::CallReceiverFromVp(vp);
 	RootedObject callee(cx, &rec.callee());
@@ -143,7 +139,8 @@ bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 		return false;
 	}
 	RootedString namestr(c->cx, ToString(c->cx, nameval));
-	char *name = JS_EncodeStringToUTF8(c->cx, namestr); 
+    JSAutoByteString bytes;
+	char *name = bytes.encodeUtf8(c->cx, namestr); 
 	// get args
 	JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 	RootedObject argArray(c->cx, JS_NewArrayObject(c->cx, argc));
@@ -183,81 +180,184 @@ bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 		free(result);
 	}
 	free(buf.str);
-	JSAPI_FreeChar(c, name);
 	return ok;
 }
 
-void* JSAPI_DefineFunction(JSAPIContext *c, void *o, char *name){
-	if( o == NULL ){
-		o = c->o;
+jerr JSAPI_DefineFunction(JSAPIContext *c, JSObject* parent, char *name){
+	if( parent == NULL ){
+		parent = c->o;
 	}
-    JSAutoRequest ar(c->cx);
-	RootedObject parent(c->cx, (JSObject*) o);
-	RootedObject global(c->cx, c->o);
-	JSAutoCompartment ac(c->cx, global);
-	JSFunction *fun = JS_DefineFunction(c->cx, parent, name, wrapGoFunction, 0, 0);
-	return fun;
+	JSAutoRequest ar(c->cx);
+	JSAutoCompartment ac(c->cx, c->o);
+	RootedObject p(c->cx, (JSObject*) parent);
+	JS_DefineFunction(c->cx, p, name, wrapGoFunction, 0, 0);
+	return JSAPI_OK;
+}
+
+bool wrapGoGetter(JSContext *cx,  JS::HandleObject obj, JS::Handle<jsid> propid, JS::MutableHandle<JS::Value> vp) {
+	JSAPIContext *c = (JSAPIContext*)JS_GetContextPrivate(cx);
+	JSAutoRequest ar(cx);
+	JSAutoCompartment ac(cx, c->o);
+	// get name
+    RootedValue idvalue(cx, IdToValue(propid));
+    RootedString idstring(cx, ToString(cx, idvalue));
+    JSAutoByteString idstr;
+    if (!idstr.encodeLatin1(cx, idstring)){
+		JS_ReportError(c->cx, "%s", "property id was not a valid string");
+        return false;
+	}
+	// call go
+	bool ok = true;
+	char* result = NULL;
+	RootedValue out(cx);
+	if( go_getter(c, obj, idstr.ptr(), &result) ){
+		if( strlen(result) > 0 ){
+			RootedString resultstr(c->cx, JS_NewStringCopyZ(c->cx, result));
+			if( JS_ParseJSON(c->cx, resultstr, &out) ){
+				vp.set(out);
+			} else {
+				ok = false;
+			}
+		} else { // return undefined if no json but healthy response
+			vp.setUndefined();
+		}
+	} else {
+		ok = false;
+		JS_ReportError(c->cx, "%s", result);
+	}
+	return ok;
+}
+
+bool wrapGoSetter(JSContext *cx,  JS::Handle<JSObject*> obj, JS::Handle<jsid> propid, bool x, JS::MutableHandle<JS::Value> vp) {
+	JSAPIContext *c = (JSAPIContext*)JS_GetContextPrivate(cx);
+	JSAutoRequest ar(cx);
+	JSAutoCompartment ac(cx, c->o);
+	// get name
+    RootedValue idvalue(cx, IdToValue(propid));
+    RootedString idstring(cx, ToString(cx, idvalue));
+    JSAutoByteString idstr;
+    if (!idstr.encodeLatin1(cx, idstring)){
+		JS_ReportError(c->cx, "%s", "property id was not a valid string");
+        return false;
+	}
+	// convert to json 
+	jsonBuffer buf;
+	buf.str = NULL;
+	buf.c = c;
+	buf.n = 0;
+	RootedObject replacer(c->cx);
+	RootedValue undefined(c->cx);
+	JS_Stringify(c->cx, vp, replacer, undefined, stringifier, &buf);
+	// call go
+	bool ok = true;
+	char* result = NULL;
+	RootedValue out(cx);
+	if( go_setter(c, obj, idstr.ptr(), buf.str, int(buf.n), &result) ){
+		if( strlen(result) > 0 ){
+			RootedString resultstr(c->cx, JS_NewStringCopyZ(c->cx, result));
+			if( JS_ParseJSON(c->cx, resultstr, &out) ){
+				vp.set(out);
+			} else {
+				ok = false;
+			}
+		} else { // return undefined if no json but healthy response
+			vp.setUndefined();
+		}
+	} else {
+		ok = false;
+		JS_ReportError(c->cx, "%s", result);
+	}
+	free(buf.str);
+	return ok;
+}
+
+jerr JSAPI_DefineProperty(JSAPIContext *c, JSObject* parent, char *name){
+	if( parent == NULL ){
+		parent = c->o;
+	}
+	JSAutoRequest ar(c->cx);
+	JSAutoCompartment ac(c->cx, c->o);
+	RootedObject p(c->cx, parent);
+	RootedValue undefined(c->cx, UndefinedValue());
+	bool ok = JS_DefineProperty(
+			c->cx,        // context
+			p,            // prop's owner
+			name,         // prop name
+			undefined,    // initial value
+			JSPROP_ENUMERATE | JSPROP_SHARED,
+			wrapGoGetter, // getter callback
+			wrapGoSetter // setter callback
+			);
+	if( !ok ){
+		return JSAPI_FAIL;
+	}
+	return JSAPI_OK;
 }
 
 static JSRuntime *grt = NULL;
 static JSContext *gcx = NULL;
 
 // Inits the js runtime and returns the thread id it's running on
-void JSAPI_Init() {
+jerr JSAPI_Init() {
     if (!JS_Init()){
-		printf("failed to init\n");
+		return JSAPI_FAIL;
 	}
     // Create global runtime
     grt = JS_NewRuntime(2048L * 1024L * 1024L, 0);
     if (!grt) {
-		printf("failed to make global runtime\n");
+		return JSAPI_FAIL;
 	}
+	return JSAPI_OK;
 }
 
-int JSAPI_ThreadCanAccessRuntime() {
-	//if( rt->ownerThread_ == PR_GetCurrentThread()
-    if( CurrentThreadCanAccessRuntime(grt) ){
-		return 1;
+jerr JSAPI_ThreadCanAccessRuntime() {
+    if( !CurrentThreadCanAccessRuntime(grt) ){
+		return JSAPI_FAIL;
 	}
-	return 0;
+	return JSAPI_OK;
 }
 
 
 JSAPIContext* JSAPI_NewContext(){
 	JSAPIContext *c = (JSAPIContext*)malloc(sizeof(JSAPIContext));
-    // use global runtime
-    c->rt = grt;
-    // Create a new context
-    c->cx = JS_NewContext(c->rt, 8192);
-    if (!c->cx) {
+	// use global runtime
+	c->rt = grt;
+	// Create a new context
+	c->cx = JS_NewContext(c->rt, 8192);
+	if (!c->cx) {
 		printf("failed to make cx\n");
-		return 0;
+		return NULL;
 	}
+	// Start request
+	JSAutoRequest ar(c->cx);
 	/* Erros */
-    JS_SetErrorReporter(c->cx, reportError);
+	JS_SetErrorReporter(c->cx, reportError);
 	JS::SetOutOfMemoryCallback(c->rt, reportOOM, c);
-    /* Create the global object in a new compartment. */
-    JSAutoRequest ar(c->cx);
-    RootedObject global(c->cx, JS_NewGlobalObject(c->cx, &global_class, nullptr, JS::DontFireOnNewGlobalHook));
-    JSAutoCompartment ac(c->cx, global);
-	js::SetDefaultObjectForContext(c->cx, global);
-	c->o = global;
-    /* Populate the global object with the standard globals, like Object and Array. */
-    if (!JS_InitStandardClasses(c->cx, global)) {
-		printf("failed to init global classes\n");
-        return 0;
+	// Create the global object
+	c->o = JS_NewGlobalObject(c->cx, &global_class, nullptr, JS::DontFireOnNewGlobalHook);
+	JSAutoCompartment ac(c->cx, c->o);
+	RootedObject global(c->cx, c->o);
+	if (!global) {
+		printf("failed to make global");
+		return NULL;
 	}
-	/* assign our context */
+	if (!JS_InitStandardClasses(c->cx, global)) {
+		printf("failed to init global classes\n");
+		return NULL;
+	}
+	c->o = global;
+	JS_FireOnNewGlobalObject(c->cx, global);
+	// store context
 	JS_SetContextPrivate(c->cx, c);
 	return c;
 }
 
-int JSAPI_DestroyContext(JSAPIContext *c){
+jerr JSAPI_DestroyContext(JSAPIContext *c){
 	if( c != NULL ){
 		JS_DestroyContext(c->cx);
 		free(c);
 	}
-	return 0;
+	return JSAPI_OK;
 }
 
 void JSAPI_FreeChar(JSAPIContext *c, char *p){
@@ -268,10 +368,10 @@ void JSAPI_FreeChar(JSAPIContext *c, char *p){
 // JSON string (outstr).
 // Returns JSAPI_OK on success.
 // NOTE: outstr requires freeing on success.
-int JSAPI_EvalJSON(JSAPIContext *c, char *source, char *filename, char **outstr, int *outlen){
-    RootedObject global(c->cx, c->o);
+jerr JSAPI_EvalJSON(JSAPIContext *c, char *source, char *filename, char **outstr, int *outlen){
     JSAutoRequest ar(c->cx);
-    JSAutoCompartment ac(c->cx, global);
+    JSAutoCompartment ac(c->cx, c->o);
+    RootedObject global(c->cx, c->o);
 	RootedValue rval(c->cx);
 	// eval
 	if (!JS_EvaluateScript(c->cx, global, source, strlen(source), filename, 0, &rval)) {
@@ -296,10 +396,10 @@ int JSAPI_EvalJSON(JSAPIContext *c, char *source, char *filename, char **outstr,
 }
 
 // Executes javascript source string and discards any response.
-int JSAPI_Eval(JSAPIContext *c, char *source, char *filename){
-    RootedObject global(c->cx, c->o);
+jerr JSAPI_Eval(JSAPIContext *c, char *source, char *filename){
     JSAutoRequest ar(c->cx);
-    JSAutoCompartment ac(c->cx, global);
+    JSAutoCompartment ac(c->cx, c->o);
+    RootedObject global(c->cx, c->o);
 	RootedValue rval(c->cx);
 	// eval
 	if (!JS_EvaluateScript(c->cx, global, source, strlen(source), filename, 0, &rval)) {

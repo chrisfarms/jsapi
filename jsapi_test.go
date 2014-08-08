@@ -82,7 +82,7 @@ func TestObjectWithIntFunction(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	math := cx.DefineObject("math")
+	math := cx.DefineObject("math", nil)
 
 	math.DefineFunction("add", func(a int, b int) int {
 		return a + b
@@ -104,7 +104,7 @@ func TestObjectWithVaridicFunction(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	obj := cx.DefineObject("fmt")
+	obj := cx.DefineObject("fmt", nil)
 
 	obj.DefineFunction("sprintf", func(format string, args ...interface{}) string {
 		return fmt.Sprintf(format, args...)
@@ -163,7 +163,7 @@ func TestErrorsInFunction(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	obj := cx.DefineObject("errs")
+	obj := cx.DefineObject("errs", nil)
 
 	fn := obj.DefineFunction("raise", func(msg string) {
 		panic(msg)
@@ -188,7 +188,44 @@ func TestErrorsInFunction(t *testing.T) {
 
 }
 
+func TestObjectProperties(t *testing.T) {
+
+  type Person struct {
+    Name string
+    Age int
+  }
+
+  cx := NewContext()
+  defer cx.Destroy()
+
+  person := &Person{"jeff", 22}
+
+	cx.DefineObject("o", person)
+
+	var s string
+	err := cx.Eval(`o.Name`, &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s != person.Name {
+		t.Fatalf(`expected to get value of person.Name (%q) from js but got %q`, person.Name, s)
+	}
+
+	err = cx.Eval(`o.Name = "geoff"`, &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if person.Name != "geoff"{
+		t.Fatalf(`expected to set value of person.Name to "geoff" but got %q`, person.Name)
+	}
+
+}
+
 func TestOneContextManyGoroutines(t *testing.T) {
+
+  if testing.Short() {
+    t.Skip()
+  }
 
 	runtime.GOMAXPROCS(20)
 
@@ -224,6 +261,10 @@ func TestOneContextManyGoroutines(t *testing.T) {
 }
 
 func TestManyContextManyGoroutines(t *testing.T) {
+
+  if testing.Short() {
+    t.Skip()
+  }
 
 	runtime.GOMAXPROCS(20)
 
