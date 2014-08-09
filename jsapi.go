@@ -362,20 +362,9 @@ func (cx *Context) ExecFile(filename string) (err error) {
 
 // Define a javascript object in the Context.
 // If proxy is nil, then an empty js object is created.
-//
-// cx.DefineObject("x", nil) // equivilent to x = {};
-//
 // If proxy references a struct type, then a two-way binding of all public 
 // fields within proxy the proxy object will be exposed to js via the 
 // created object.
-//
-// typedef Person {
-//     Name string
-// }
-//
-// 
-// 
-// 
 func (cx *Context) DefineObject(name string, proxy interface{}) Definer {
 	return cx.defineObject(name, proxy, nil)
 }
