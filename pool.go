@@ -1,8 +1,8 @@
 package jsapi
 
-import(
-	"sync"
+import (
 	"io"
+	"sync"
 )
 
 type pfn struct {
@@ -10,12 +10,11 @@ type pfn struct {
 	done chan bool
 }
 
-
 type Pool struct {
-	cxs []*Context
-	in chan *pfn
-	wg sync.WaitGroup
-	n int // readonly pool size
+	cxs   []*Context
+	in    chan *pfn
+	wg    sync.WaitGroup
+	n     int  // readonly pool size
 	Valid bool // is this pool active
 }
 
@@ -30,10 +29,10 @@ func NewPool(n int) *Pool {
 		cx := NewContext()
 		p.cxs[i] = cx
 		p.wg.Add(1)
-		go func(cx *Context){
+		go func(cx *Context) {
 			for {
 				select {
-				case fn,ok := <-p.in:
+				case fn, ok := <-p.in:
 					if !ok {
 						cx.Destroy()
 						p.wg.Done()
@@ -69,7 +68,7 @@ func (p *Pool) DefineObject(name string, proxy interface{}) Definer {
 // Execute source js in the first available worker context and return
 // the result of the expression to result.
 func (p *Pool) Eval(source string, result interface{}) (err error) {
-	p.one(func(cx *Context){
+	p.one(func(cx *Context) {
 		err = cx.Eval(source, result)
 	})
 	return err
@@ -78,7 +77,7 @@ func (p *Pool) Eval(source string, result interface{}) (err error) {
 // Execute source js in the first available worker context.
 // Errors are returned but the value of the expression is discarded.
 func (p *Pool) Exec(source string) (err error) {
-	p.one(func(cx *Context){
+	p.one(func(cx *Context) {
 		err = cx.Exec(source)
 	})
 	return err
@@ -86,7 +85,7 @@ func (p *Pool) Exec(source string) (err error) {
 
 // Execute js from a file in the next available worker context.
 func (p *Pool) ExecFile(filename string) (err error) {
-	p.one(func(cx *Context){
+	p.one(func(cx *Context) {
 		err = cx.ExecFile(filename)
 	})
 	return err
@@ -119,7 +118,7 @@ func (p *Pool) ExecFileAll(filename string) (err error) {
 // Execute js from an io.Reader in the first available worker
 // context.
 func (p *Pool) ExecFrom(r io.Reader) (err error) {
-	p.one(func(cx *Context){
+	p.one(func(cx *Context) {
 		err = cx.ExecFrom(r)
 	})
 	return err
@@ -144,7 +143,7 @@ func (p *Pool) one(callback func(cx *Context)) {
 		call: callback,
 		done: make(chan bool, 1),
 	}
-	p.in <-fn
+	p.in <- fn
 	<-fn.done
 	return
 }
@@ -154,7 +153,7 @@ func (p *Pool) Wait() {
 }
 
 type ObjectPool struct {
-	p *Pool
+	p       *Pool
 	objects []*Object
 }
 

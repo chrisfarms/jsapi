@@ -1,17 +1,17 @@
 package jsapi
 
-import(
-	"testing"
-	"time"
+import (
 	"fmt"
 	"runtime"
 	"sync"
+	"testing"
+	"time"
 )
 
 func BenchmarkEvalSngl(b *testing.B) {
 	cx := NewContext()
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB){
+	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			var result interface{}
 			err := cx.Eval(script, &result)
@@ -88,7 +88,7 @@ func TestEvalErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error to be returned")
 	}
-	r,ok := err.(*ErrorReport)
+	r, ok := err.(*ErrorReport)
 	if !ok {
 		t.Fatalf("expected the error to be an ErrorReport but got: %T %v", err, err)
 	}
@@ -189,7 +189,6 @@ func TestSleepContext(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-
 	cx.DefineFunction("sleep", func(ms int) {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	})
@@ -216,7 +215,7 @@ func TestErrorsInFunction(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error to be returned")
 	}
-	r,ok := err.(*ErrorReport)
+	r, ok := err.(*ErrorReport)
 	if !ok {
 		t.Fatalf("expected the error to be an ErrorReport but got: %T %v", err, err)
 	}
@@ -229,15 +228,15 @@ func TestErrorsInFunction(t *testing.T) {
 
 func TestObjectProperties(t *testing.T) {
 
-  type Person struct {
-    Name string
-    Age int
-  }
+	type Person struct {
+		Name string
+		Age  int
+	}
 
-  cx := NewContext()
-  defer cx.Destroy()
+	cx := NewContext()
+	defer cx.Destroy()
 
-  person := &Person{"jeff", 22}
+	person := &Person{"jeff", 22}
 
 	cx.DefineObject("o", person)
 
@@ -254,7 +253,7 @@ func TestObjectProperties(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if person.Name != "geoff"{
+	if person.Name != "geoff" {
 		t.Fatalf(`expected to set value of person.Name to "geoff" but got %q`, person.Name)
 	}
 
@@ -279,9 +278,9 @@ func TestObjectProperties(t *testing.T) {
 
 func TestOneContextManyGoroutines(t *testing.T) {
 
-  if testing.Short() {
-    t.Skip()
-  }
+	if testing.Short() {
+		t.Skip()
+	}
 
 	runtime.GOMAXPROCS(20)
 
@@ -293,50 +292,12 @@ func TestOneContextManyGoroutines(t *testing.T) {
 		return true
 	})
 
-    wg := new(sync.WaitGroup)
-    for i := 0; i < 100; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            for j := 0; j < 50; j++ {
-				var ok bool
-				err := cx.Eval(`snooze(0)`, &ok)
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				if !ok {
-					t.Errorf("expected ok response")
-					return
-				}
-            }
-        }()
-    }
-    wg.Wait()
-
-}
-
-func TestManyContextManyGoroutines(t *testing.T) {
-
-  if testing.Short() {
-    t.Skip()
-  }
-
-	runtime.GOMAXPROCS(20)
-
-    wg := new(sync.WaitGroup)
-    for i := 0; i < 100; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-			cx := NewContext()
-			defer cx.Destroy()
-
-			cx.DefineFunction("snooze", func(ms int) bool {
-				time.Sleep(time.Duration(ms) * time.Millisecond)
-				return true
-			})
-            for j := 0; j < 50; j++ {
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
 				var ok bool
 				err := cx.Eval(`snooze(0)`, &ok)
 				if err != nil {
@@ -348,12 +309,49 @@ func TestManyContextManyGoroutines(t *testing.T) {
 					return
 				}
 			}
-        }()
-    }
-    wg.Wait()
+		}()
+	}
+	wg.Wait()
 
 }
 
+func TestManyContextManyGoroutines(t *testing.T) {
+
+	if testing.Short() {
+		t.Skip()
+	}
+
+	runtime.GOMAXPROCS(20)
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cx := NewContext()
+			defer cx.Destroy()
+
+			cx.DefineFunction("snooze", func(ms int) bool {
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+				return true
+			})
+			for j := 0; j < 50; j++ {
+				var ok bool
+				err := cx.Eval(`snooze(0)`, &ok)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if !ok {
+					t.Errorf("expected ok response")
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+}
 
 func TestExecFile(t *testing.T) {
 
@@ -377,7 +375,7 @@ func TestDeadlockCondition(t *testing.T) {
 
 	cx := NewContext()
 	defer cx.Destroy()
-	cx.DefineFunction("mkfun", func(){
+	cx.DefineFunction("mkfun", func() {
 		cx.DefineFunction("dynamic", func() bool {
 			return true
 		})

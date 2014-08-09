@@ -1,13 +1,16 @@
-package jsapi
+package jsapi_test
 
-import "fmt"
+import(
+	"fmt"
+	"github.com/chrisfarms/jsapi"
+)
 
 func ExampleContext_DefineObject_Empty() {
-	cx := NewContext()
+	cx := jsapi.NewContext()
 	cx.DefineObject("o", nil) // equivilent to `o = {}` in js
 }
 
-func ExampleContext_DefineObject_Proxy() {
+func ExampleContext_DefineObject() {
 	// Create a simple Person type
 	type Person struct {
 		Name string
@@ -15,7 +18,7 @@ func ExampleContext_DefineObject_Proxy() {
 	p := &Person{"jeff"}
 
 	// Create a context and map our person into it
-	cx := NewContext()
+	cx := jsapi.NewContext()
 	cx.DefineObject("person", p)
 
 	// Read the name from javascript

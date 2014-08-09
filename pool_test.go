@@ -1,25 +1,23 @@
 package jsapi
 
-import(
-	"testing"
-	"time"
+import (
+	"fmt"
 	"runtime"
 	"sync"
-	"fmt"
+	"testing"
+	"time"
 )
 
-const(
+const (
 	POOL_SIZE = 8
-	delay = 10
-	script = `1+1`
+	delay     = 10
+	script    = `1+1`
 )
-
-
 
 func BenchmarkEvalPool(b *testing.B) {
 	cx := NewPool(POOL_SIZE)
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB){
+	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			var result interface{}
 			err := cx.Eval(script, &result)
@@ -96,7 +94,7 @@ func TestPoolEvalErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error to be returned")
 	}
-	r,ok := err.(*ErrorReport)
+	r, ok := err.(*ErrorReport)
 	if !ok {
 		t.Fatalf("expected the error to be an ErrorReport but got: %T %v", err, err)
 	}
@@ -197,7 +195,6 @@ func TestPoolSleepContext(t *testing.T) {
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
 
-
 	cx.DefineFunction("sleep", func(ms int) {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	})
@@ -224,7 +221,7 @@ func TestPoolErrorsInFunction(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error to be returned")
 	}
-	r,ok := err.(*ErrorReport)
+	r, ok := err.(*ErrorReport)
 	if !ok {
 		t.Fatalf("expected the error to be an ErrorReport but got: %T %v", err, err)
 	}
@@ -237,15 +234,15 @@ func TestPoolErrorsInFunction(t *testing.T) {
 
 func TestPoolObjectProperties(t *testing.T) {
 
-  type Person struct {
-    Name string
-    Age int
-  }
+	type Person struct {
+		Name string
+		Age  int
+	}
 
-  cx := NewPool(POOL_SIZE)
-  defer cx.Destroy()
+	cx := NewPool(POOL_SIZE)
+	defer cx.Destroy()
 
-  person := &Person{"jeff", 22}
+	person := &Person{"jeff", 22}
 
 	cx.DefineObject("o", person)
 
@@ -262,7 +259,7 @@ func TestPoolObjectProperties(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if person.Name != "geoff"{
+	if person.Name != "geoff" {
 		t.Fatalf(`expected to set value of person.Name to "geoff" but got %q`, person.Name)
 	}
 
@@ -287,9 +284,9 @@ func TestPoolObjectProperties(t *testing.T) {
 
 func TestPoolOneContextManyGoroutines(t *testing.T) {
 
-  if testing.Short() {
-    t.Skip()
-  }
+	if testing.Short() {
+		t.Skip()
+	}
 
 	runtime.GOMAXPROCS(20)
 
@@ -301,50 +298,12 @@ func TestPoolOneContextManyGoroutines(t *testing.T) {
 		return true
 	})
 
-    wg := new(sync.WaitGroup)
-    for i := 0; i < 100; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            for j := 0; j < 50; j++ {
-				var ok bool
-				err := cx.Eval(`snooze(0)`, &ok)
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				if !ok {
-					t.Errorf("expected ok response")
-					return
-				}
-            }
-        }()
-    }
-    wg.Wait()
-
-}
-
-func TestPoolManyContextManyGoroutines(t *testing.T) {
-
-  if testing.Short() {
-    t.Skip()
-  }
-
-	runtime.GOMAXPROCS(20)
-
-    wg := new(sync.WaitGroup)
-    for i := 0; i < 100; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-			cx := NewPool(POOL_SIZE)
-			defer cx.Destroy()
-
-			cx.DefineFunction("snooze", func(ms int) bool {
-				time.Sleep(time.Duration(ms) * time.Millisecond)
-				return true
-			})
-            for j := 0; j < 50; j++ {
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
 				var ok bool
 				err := cx.Eval(`snooze(0)`, &ok)
 				if err != nil {
@@ -356,12 +315,49 @@ func TestPoolManyContextManyGoroutines(t *testing.T) {
 					return
 				}
 			}
-        }()
-    }
-    wg.Wait()
+		}()
+	}
+	wg.Wait()
 
 }
 
+func TestPoolManyContextManyGoroutines(t *testing.T) {
+
+	if testing.Short() {
+		t.Skip()
+	}
+
+	runtime.GOMAXPROCS(20)
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cx := NewPool(POOL_SIZE)
+			defer cx.Destroy()
+
+			cx.DefineFunction("snooze", func(ms int) bool {
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+				return true
+			})
+			for j := 0; j < 50; j++ {
+				var ok bool
+				err := cx.Eval(`snooze(0)`, &ok)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if !ok {
+					t.Errorf("expected ok response")
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+}
 
 func TestPoolExecFile(t *testing.T) {
 
@@ -385,7 +381,7 @@ func TestPoolDeadlockCondition(t *testing.T) {
 
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
-	cx.DefineFunction("mkfun", func(){
+	cx.DefineFunction("mkfun", func() {
 		cx.DefineFunction("dynamic", func() bool {
 			return true
 		})

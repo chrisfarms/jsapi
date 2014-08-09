@@ -8,14 +8,14 @@ void Init();
 */
 import "C"
 import (
-	"fmt"
-	"unsafe"
-	"reflect"
-	"runtime"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"reflect"
+	"runtime"
+	"unsafe"
 )
 
 var jsapi *api
@@ -52,7 +52,7 @@ func start() *api {
 		in: make(chan *fn),
 	}
 	ready := make(chan bool)
-	go func(){
+	go func() {
 		runtime.LockOSThread()
 		C.Init()
 		if C.JSAPI_Init() != C.JSAPI_OK {
@@ -76,14 +76,13 @@ func init() {
 	jsapi = start()
 }
 
-
 var contexts = make(map[int]*Context)
 
 type destroyer interface {
 	Destroy()
 }
 
-func finalizer(x destroyer){
+func finalizer(x destroyer) {
 	x.Destroy()
 }
 
@@ -95,8 +94,8 @@ func workerWait(id C.int, ptr *C.JSAPIContext) {
 	if !ok {
 		panic("attempt to wait on a non existant context worker")
 	}
-	cx.ready <-nil
-	for{
+	cx.ready <- nil
+	for {
 		select {
 		case fn, ok := <-cx.in:
 			if !ok {
@@ -145,8 +144,8 @@ func callFunction(c *C.JSAPIContext, id *C.JSObject, cname *C.char, args *C.char
 			return 0
 		}
 	}
-	json := C.GoStringN(args,argn)
-	outjson,err := fn.call(json)
+	json := C.GoStringN(args, argn)
+	outjson, err := fn.call(json)
 	if err != nil {
 		*out = C.CString(err.Error())
 		return 0
@@ -182,7 +181,7 @@ func getprop(c *C.JSAPIContext, id *C.JSObject, cname *C.char, out **C.char) C.i
 		*out = C.CString("attempt to get property that doesn't appear to exist")
 		return 0
 	}
-	outjson,err := p.get()
+	outjson, err := p.get()
 	if err != nil {
 		*out = C.CString(err.Error())
 		return 0
@@ -208,8 +207,8 @@ func setprop(c *C.JSAPIContext, id *C.JSObject, cname *C.char, val *C.char, valn
 		*out = C.CString("attempt to set property that doesn't appear to exist")
 		return 0
 	}
-	json := C.GoStringN(val,valn)
-	outjson,err := p.set(json)
+	json := C.GoStringN(val, valn)
+	outjson, err := p.set(json)
 	if err != nil {
 		*out = C.CString(err.Error())
 		return 0
@@ -220,8 +219,8 @@ func setprop(c *C.JSAPIContext, id *C.JSObject, cname *C.char, val *C.char, valn
 
 type ErrorReport struct {
 	Filename string
-	Line uint
-	Message string
+	Line     uint
+	Message  string
 }
 
 func (err *ErrorReport) Error() string {
@@ -231,7 +230,6 @@ func (err *ErrorReport) Error() string {
 func (err *ErrorReport) String() string {
 	return err.Message
 }
-
 
 // Types that implement Definer can create mappings of objects
 // and functions between javascript and Go
@@ -249,14 +247,14 @@ type Evaluator interface {
 }
 
 type Context struct {
-	id int
-	ptr *C.JSAPIContext
+	id    int
+	ptr   *C.JSAPIContext
 	ready chan error
-	in chan *cxfn
-	objs map[*C.JSObject]*Object
+	in    chan *cxfn
+	objs  map[*C.JSObject]*Object
 	funcs map[string]*function
 	Valid bool
-	errs map[string]*ErrorReport
+	errs  map[string]*ErrorReport
 }
 
 // The javascript side ends up calling this when an uncaught
@@ -267,8 +265,8 @@ func (cx *Context) setError(filename string, line uint, message string) {
 	}
 	cx.errs[filename] = &ErrorReport{
 		Filename: filename,
-		Line: line,
-		Message: message,
+		Line:     line,
+		Message:  message,
 	}
 }
 
@@ -294,7 +292,7 @@ func (cx *Context) Destroy() {
 
 // Execute javascript source in Context and discard any response
 func (cx *Context) Exec(source string) (err error) {
-	cx.do(func(ptr *C.JSAPIContext){
+	cx.do(func(ptr *C.JSAPIContext) {
 		csource := C.CString(source)
 		defer C.free(unsafe.Pointer(csource))
 		filename := "eval"
@@ -316,7 +314,7 @@ func (cx *Context) Exec(source string) (err error) {
 // Scanning follows the rules of json.Unmarshal so most go native types are
 // supported and complex javascript objects can be scanned by referancing structs.
 func (cx *Context) Eval(source string, result interface{}) (err error) {
-	cx.do(func(ptr *C.JSAPIContext){
+	cx.do(func(ptr *C.JSAPIContext) {
 		// alloc C-string
 		csource := C.CString(source)
 		defer C.free(unsafe.Pointer(csource))
@@ -362,8 +360,8 @@ func (cx *Context) ExecFile(filename string) (err error) {
 
 // Define a javascript object in the Context.
 // If proxy is nil, then an empty js object is created.
-// If proxy references a struct type, then a two-way binding of all public 
-// fields within proxy the proxy object will be exposed to js via the 
+// If proxy references a struct type, then a two-way binding of all public
+// fields within proxy the proxy object will be exposed to js via the
 // created object.
 func (cx *Context) DefineObject(name string, proxy interface{}) Definer {
 	return cx.defineObject(name, proxy, nil)
@@ -374,7 +372,7 @@ func (cx *Context) defineObject(name string, proxy interface{}, id *C.JSObject) 
 	o.funcs = make(map[string]*function)
 	o.props = make(map[string]*prop)
 	o.cx = cx
-	cx.do(func(ptr *C.JSAPIContext){
+	cx.do(func(ptr *C.JSAPIContext) {
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
 		o.id = C.JSAPI_DefineObject(ptr, id, cname)
@@ -390,7 +388,7 @@ func (cx *Context) defineObject(name string, proxy interface{}, id *C.JSObject) 
 			if ot.Kind() != reflect.Struct {
 				panic("proxy object must be a kind of struct or pointer to a struct")
 			}
-			for i := 0; i<ot.NumField(); i++ {
+			for i := 0; i < ot.NumField(); i++ {
 				f := ot.Field(i)
 				fv := ov.Field(i)
 				o.props[f.Name] = &prop{f.Name, fv, f.Type}
@@ -423,10 +421,10 @@ func (cx *Context) defineFunction(name string, fun interface{}, id *C.JSObject) 
 	// check inarg types are acceptable
 	for i := 0; i < f.t.NumIn(); i++ {
 		switch f.t.In(i).Kind() {
-		case reflect.Bool,reflect.Int,reflect.Int8,reflect.Int16,
-			reflect.Int32,reflect.Int64,reflect.Uint,reflect.Uint8,
-			reflect.Uint16,reflect.Uint32,reflect.Uint64,reflect.Float32,
-			reflect.Float64,reflect.Interface,reflect.Map,reflect.Slice,
+		case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16,
+			reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8,
+			reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32,
+			reflect.Float64, reflect.Interface, reflect.Map, reflect.Slice,
 			reflect.String:
 			// ok
 		default:
@@ -434,7 +432,7 @@ func (cx *Context) defineFunction(name string, fun interface{}, id *C.JSObject) 
 		}
 	}
 	f.name = "[anon]"
-	cx.do(func(ptr *C.JSAPIContext){
+	cx.do(func(ptr *C.JSAPIContext) {
 		cname := C.CString(name)
 		defer C.free(unsafe.Pointer(cname))
 		if C.JSAPI_DefineFunction(ptr, id, cname) != C.JSAPI_OK {
@@ -463,7 +461,6 @@ func (cx *Context) do(callback func(*C.JSAPIContext)) {
 	<-fn.done
 }
 
-
 func NewContext() *Context {
 	cx := &Context{}
 	cx.id = uid()
@@ -471,8 +468,8 @@ func NewContext() *Context {
 	cx.in = make(chan *cxfn)
 	cx.objs = make(map[*C.JSObject]*Object)
 	cx.funcs = make(map[string]*function)
-	jsapi.do(func(){
-		if( C.JSAPI_NewContext(C.int(cx.id)) != C.JSAPI_OK ){
+	jsapi.do(func() {
+		if C.JSAPI_NewContext(C.int(cx.id)) != C.JSAPI_OK {
 			panic("failed to spawn new context")
 		}
 		contexts[cx.id] = cx
@@ -483,15 +480,15 @@ func NewContext() *Context {
 	}
 	cx.Valid = true
 	runtime.SetFinalizer(cx, finalizer)
-	cx.do(func(ptr *C.JSAPIContext){
+	cx.do(func(ptr *C.JSAPIContext) {
 		cx.ptr = ptr
 	})
 	return cx
 }
 
 type Object struct {
-	id *C.JSObject
-	cx *Context
+	id    *C.JSObject
+	cx    *Context
 	funcs map[string]*function
 	props map[string]*prop
 	proxy interface{}
@@ -508,8 +505,8 @@ func (o *Object) DefineObject(name string, proxy interface{}) Definer {
 
 type function struct {
 	name string
-	v reflect.Value
-	t reflect.Type
+	v    reflect.Value
+	t    reflect.Type
 }
 
 func (f *function) call(in string) (out string, err error) {
@@ -537,7 +534,7 @@ func (f *function) rawcall(in string) (out string, err error) {
 		v := reflect.ValueOf(inargs[i])
 		var t reflect.Type
 		if f.t.IsVariadic() && i >= f.t.NumIn()-1 { // handle varargs
-			t = f.t.In(f.t.NumIn()-1).Elem()
+			t = f.t.In(f.t.NumIn() - 1).Elem()
 		} else {
 			t = f.t.In(i)
 		}
@@ -553,14 +550,14 @@ func (f *function) rawcall(in string) (out string, err error) {
 	case 0:
 		return "", nil
 	case 1:
-		b,err := json.Marshal(outvals[0].Interface())
+		b, err := json.Marshal(outvals[0].Interface())
 		return string(b), err
 	default:
 		outargs := make([]interface{}, len(outvals))
 		for i := 0; i < len(outvals); i++ {
 			outargs[i] = outvals[i].Interface()
 		}
-		b,err := json.Marshal(outargs)
+		b, err := json.Marshal(outargs)
 		return string(b), err
 	}
 }
@@ -582,13 +579,13 @@ func cast(v reflect.Value, t reflect.Type) (reflect.Value, error) {
 // prop is a wrapper around a struct's field's refelction
 type prop struct {
 	name string
-	v reflect.Value
-	t reflect.Type
+	v    reflect.Value
+	t    reflect.Type
 }
 
 // get json for property
 func (p *prop) get() (string, error) {
-	b,err := json.Marshal(p.v.Interface())
+	b, err := json.Marshal(p.v.Interface())
 	return string(b), err
 }
 
@@ -607,4 +604,3 @@ func (p *prop) set(injson string) (string, error) {
 	p.v.Set(xv)
 	return p.get()
 }
-
