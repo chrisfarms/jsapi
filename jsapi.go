@@ -560,10 +560,35 @@ func (f *function) rawcall(in string) (out string, err error) {
 // try to convert v to something that is assignable to type t
 func cast(v reflect.Value, t reflect.Type) (reflect.Value, error) {
 	if v.Type().Kind() == reflect.Ptr && t.Kind() != reflect.Ptr {
-		v = reflect.Indirect(v)
+		v = v.Elem()
 	}
 	if !v.Type().AssignableTo(t) {
 		if !v.Type().ConvertibleTo(t) {
+			// A common failure here is that we want to
+			// cast a map[string]interface{} -> struct.
+			// This is obviously not possible, but since it is *known*
+			// that the source and target can both be serialized to
+			// JSON, we can do a nasty hack to fix it
+			// TODO: find a better way!
+			if (t.Kind() == reflect.Ptr || t.Kind() == reflect.Struct) && v.Type().Kind() == reflect.Map {
+				b, err := json.Marshal(v.Interface())
+				if err != nil {
+					return v, fmt.Errorf("cannot cast %s to %s: %s", v.Type().Kind(), t.Kind(), err.Error())
+				}
+				vt := t
+				if vt.Kind() == reflect.Ptr {
+					vt = t.Elem()
+				}
+				vv := reflect.New(vt)
+				err = json.Unmarshal(b, vv.Interface())
+				if err != nil {
+					return v, fmt.Errorf("cannot cast %s to %s: %s", v.Type().Kind(), t.Kind(), err.Error())
+				}
+				if t.Kind() != reflect.Ptr && vv.Type().Kind() == reflect.Ptr {
+					vv = vv.Elem()
+				}
+				return vv, nil
+			}
 			return v, fmt.Errorf("cannot cast %s to %s", v.Type().Kind(), t.Kind())
 		}
 		v = v.Convert(t)

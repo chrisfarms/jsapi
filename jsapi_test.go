@@ -392,3 +392,59 @@ func TestDeadlockCondition(t *testing.T) {
 	}
 
 }
+
+func TestStructArgsPtr(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	type args struct {
+		A int
+		B int
+		Ok bool
+	}
+
+	cx.DefineFunction("test", func(x *args) *args {
+		x.Ok = (x.A + x.B) == 3
+		return x
+	})
+
+	var y args
+	err := cx.Eval(`test({A: 1, B: 2})`, &y)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !y.Ok {
+		t.Fatalf("expected to be able to use a struct type in function args got response: %v", y)
+	}
+
+}
+
+func TestStructArgsValue(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	type args struct {
+		A int
+		B int
+		Ok bool
+	}
+
+	cx.DefineFunction("test", func(x args) args {
+		x.Ok = (x.A + x.B) == 3
+		return x
+	})
+
+	var y args
+	err := cx.Eval(`test({A: 1, B: 2})`, &y)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !y.Ok {
+		t.Fatalf("expected to be able to use a struct type in function args got response: %v", y)
+	}
+
+}
