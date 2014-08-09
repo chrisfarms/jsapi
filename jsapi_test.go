@@ -448,3 +448,26 @@ func TestStructArgsValue(t *testing.T) {
 	}
 
 }
+
+func TestRawType(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	cx.DefineFunction("raw", func() Raw {
+		return `{"ok":true}`
+	})
+
+	var res struct{
+		Ok bool
+	}
+	err := cx.Eval(`raw()`, &res)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !res.Ok {
+		t.Fatalf("expected to return raw json and have it converted")
+	}
+
+}

@@ -19,6 +19,11 @@ import (
 	"unsafe"
 )
 
+// Raw is a special type that can be returned by defined
+// functions to return raw javascript/json to be interpreted.
+// This can be useful if your function actually returns JSON
+type Raw string
+
 var jsapi *api
 
 type fn struct {
@@ -541,20 +546,18 @@ func (f *function) rawcall(in string) (out string, err error) {
 	}
 	// call func
 	outvals := f.v.Call(invals)
-	switch len(outvals) {
-	case 0:
-		return "", nil
-	case 1:
-		b, err := json.Marshal(outvals[0].Interface())
-		return string(b), err
-	default:
-		outargs := make([]interface{}, len(outvals))
-		for i := 0; i < len(outvals); i++ {
-			outargs[i] = outvals[i].Interface()
-		}
-		b, err := json.Marshal(outargs)
-		return string(b), err
+	if len(outvals) > 1 {
+		panic("javascript does not support multiple return params")
 	}
+	if len(outvals) == 0 {
+		return "", nil
+	}
+	outv := outvals[0].Interface()
+	if raw, ok := outv.(Raw); ok {
+		return string(raw), nil
+	}
+	b, err := json.Marshal(outv)
+	return string(b), err
 }
 
 // try to convert v to something that is assignable to type t
