@@ -117,15 +117,15 @@ func workerFail(id C.int, err *C.char) {
 	cx.ready <- fmt.Errorf("worker %d: %s", int(id), C.GoString(err))
 }
 
-//export callback
-func callback(c *C.JSAPIContext, id *C.JSObject, cname *C.char, args *C.char, argn C.int, out **C.char) C.int {
+//export callFunction
+func callFunction(c *C.JSAPIContext, id *C.JSObject, cname *C.char, args *C.char, argn C.int, out **C.char) C.int {
 	cx, ok := contexts[int(c.id)]
 	if !ok {
 		*out = C.CString("attempt to use context after destroyed")
 		return 0
 	}
 	name := C.GoString(cname)
-	var fn *Func
+	var fn *function
 	if id == c.o {
 		fn, ok = cx.funcs[name]
 		if !ok {
@@ -146,7 +146,7 @@ func callback(c *C.JSAPIContext, id *C.JSObject, cname *C.char, args *C.char, ar
 		}
 	}
 	json := C.GoStringN(args,argn)
-	outjson,err := fn.Call(json)
+	outjson,err := fn.call(json)
 	if err != nil {
 		*out = C.CString(err.Error())
 		return 0
@@ -232,13 +232,29 @@ func (err *ErrorReport) String() string {
 	return err.Message
 }
 
+
+// Types that implement Definer can create mappings of objects
+// and functions between javascript and Go
+type Definer interface {
+	DefineFunction(name string, fun interface{})
+	DefineObject(name string, proxy interface{}) Definer
+}
+
+// Types that impliment Evaluator can execute javascript
+type Evaluator interface {
+	Exec(source string) (err error)
+	Eval(source string, result interface{}) (err error)
+	ExecFile(filename string) (err error)
+	ExecFrom(r io.Reader) (err error)
+}
+
 type Context struct {
 	id int
 	ptr *C.JSAPIContext
 	ready chan error
 	in chan *cxfn
 	objs map[*C.JSObject]*Object
-	funcs map[string]*Func
+	funcs map[string]*function
 	Valid bool
 	errs map[string]*ErrorReport
 }
@@ -360,13 +376,13 @@ func (cx *Context) ExecFile(filename string) (err error) {
 // 
 // 
 // 
-func (cx *Context) DefineObject(name string, proxy interface{}) *Object {
+func (cx *Context) DefineObject(name string, proxy interface{}) Definer {
 	return cx.defineObject(name, proxy, nil)
 }
 
 func (cx *Context) defineObject(name string, proxy interface{}, id *C.JSObject) *Object {
 	o := &Object{}
-	o.funcs = make(map[string]*Func)
+	o.funcs = make(map[string]*function)
 	o.props = make(map[string]*prop)
 	o.cx = cx
 	cx.do(func(ptr *C.JSAPIContext){
@@ -400,95 +416,13 @@ func (cx *Context) defineObject(name string, proxy interface{}, id *C.JSObject) 
 	return o
 }
 
-func (cx *Context) DefineFunction(name string, fun interface{}) *Func {
+func (cx *Context) DefineFunction(name string, fun interface{}) {
 	f := cx.defineFunction(name, fun, nil)
-	cx.funcs[f.Name] = f
-	return f
+	cx.funcs[f.name] = f
 }
 
-func (cx *Context) defineFunction(name string, fun interface{}, id *C.JSObject) *Func {
-	f := NewFunc(fun)
-	cx.do(func(ptr *C.JSAPIContext){
-		cname := C.CString(name)
-		defer C.free(unsafe.Pointer(cname))
-		if C.JSAPI_DefineFunction(ptr, id, cname) != C.JSAPI_OK {
-			panic("failed to define function")
-		}
-		f.Name = name
-	})
-	return f
-}
-
-// Attempt to aquire mutex, then runs in primary thread.
-// panics if Context is invalid
-func (cx *Context) do(callback func(*C.JSAPIContext)) {
-	if !cx.Valid {
-		panic("attempt to use a destroyed Context")
-	}
-	if cx.ptr != nil && C.JSAPI_ThreadCanAccessContext(cx.ptr) == C.JSAPI_OK {
-		callback(cx.ptr)
-		return
-	}
-	fn := &cxfn{
-		call: callback,
-		done: make(chan bool, 1),
-	}
-	cx.in <- fn
-	<-fn.done
-}
-
-
-func NewContext() *Context {
-	cx := &Context{}
-	cx.id = uid()
-	cx.ready = make(chan error, 1)
-	cx.in = make(chan *cxfn)
-	cx.objs = make(map[*C.JSObject]*Object)
-	cx.funcs = make(map[string]*Func)
-	jsapi.do(func(){
-		if( C.JSAPI_NewContext(C.int(cx.id)) != C.JSAPI_OK ){
-			panic("failed to spawn new context")
-		}
-		contexts[cx.id] = cx
-	})
-	err := <-cx.ready
-	if err != nil {
-		panic(err)
-	}
-	cx.Valid = true
-	runtime.SetFinalizer(cx, finalizer)
-	cx.do(func(ptr *C.JSAPIContext){
-		cx.ptr = ptr
-	})
-	return cx
-}
-
-type Object struct {
-	id *C.JSObject
-	cx *Context
-	funcs map[string]*Func
-	props map[string]*prop
-	proxy interface{}
-}
-
-func (o *Object) DefineFunction(name string, fun interface{}) *Func {
-	f := o.cx.defineFunction(name, fun, o.id)
-	o.funcs[f.Name] = f
-	return f
-}
-
-func (o *Object) DefineObject(name string, proxy interface{}) *Object {
-	return o.cx.defineObject(name, proxy, o.id)
-}
-
-type Func struct {
-	Name string
-	v reflect.Value
-	t reflect.Type
-}
-
-func NewFunc(fun interface{}) *Func {
-	f := &Func{}
+func (cx *Context) defineFunction(name string, fun interface{}, id *C.JSObject) *function {
+	f := &function{}
 	f.v = reflect.ValueOf(fun)
 	if !f.v.IsValid() {
 		panic("invalid function type")
@@ -510,20 +444,95 @@ func NewFunc(fun interface{}) *Func {
 			panic("X is not a valid argument type for javascript interop")
 		}
 	}
-	f.Name = "[anon]"
+	f.name = "[anon]"
+	cx.do(func(ptr *C.JSAPIContext){
+		cname := C.CString(name)
+		defer C.free(unsafe.Pointer(cname))
+		if C.JSAPI_DefineFunction(ptr, id, cname) != C.JSAPI_OK {
+			panic("failed to define function")
+		}
+		f.name = name
+	})
 	return f
 }
 
-func (f *Func) Call(in string) (out string, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("%s: %v", f.Name, r)
-		}
-	}()
-	return f.call(in)
+// Attempt to aquire mutex, then runs in primary thread.
+// panics if Context is invalid
+func (cx *Context) do(callback func(*C.JSAPIContext)) {
+	if !cx.Valid {
+		panic("attempt to use a destroyed context")
+	}
+	if cx.ptr != nil && C.JSAPI_ThreadCanAccessContext(cx.ptr) == C.JSAPI_OK {
+		callback(cx.ptr)
+		return
+	}
+	fn := &cxfn{
+		call: callback,
+		done: make(chan bool, 1),
+	}
+	cx.in <- fn
+	<-fn.done
 }
 
-func (f *Func) call(in string) (out string, err error) {
+
+func NewContext() *Context {
+	cx := &Context{}
+	cx.id = uid()
+	cx.ready = make(chan error, 1)
+	cx.in = make(chan *cxfn)
+	cx.objs = make(map[*C.JSObject]*Object)
+	cx.funcs = make(map[string]*function)
+	jsapi.do(func(){
+		if( C.JSAPI_NewContext(C.int(cx.id)) != C.JSAPI_OK ){
+			panic("failed to spawn new context")
+		}
+		contexts[cx.id] = cx
+	})
+	err := <-cx.ready
+	if err != nil {
+		panic(err)
+	}
+	cx.Valid = true
+	runtime.SetFinalizer(cx, finalizer)
+	cx.do(func(ptr *C.JSAPIContext){
+		cx.ptr = ptr
+	})
+	return cx
+}
+
+type Object struct {
+	id *C.JSObject
+	cx *Context
+	funcs map[string]*function
+	props map[string]*prop
+	proxy interface{}
+}
+
+func (o *Object) DefineFunction(name string, fun interface{}) {
+	f := o.cx.defineFunction(name, fun, o.id)
+	o.funcs[f.name] = f
+}
+
+func (o *Object) DefineObject(name string, proxy interface{}) Definer {
+	return o.cx.defineObject(name, proxy, o.id)
+}
+
+type function struct {
+	name string
+	v reflect.Value
+	t reflect.Type
+}
+
+func (f *function) call(in string) (out string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%s: %v", f.name, r)
+		}
+	}()
+	return f.rawcall(in)
+}
+
+func (f *function) rawcall(in string) (out string, err error) {
 	// decode args
 	var inargs []interface{}
 	err = json.Unmarshal([]byte(in), &inargs)

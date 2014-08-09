@@ -8,6 +8,26 @@ import(
 	"sync"
 )
 
+func BenchmarkEvalSngl(b *testing.B) {
+	cx := NewContext()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB){
+		for pb.Next() {
+			var result interface{}
+			err := cx.Eval(script, &result)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func TestInterfaces(t *testing.T) {
+	var _ Evaluator = &Context{}
+	var _ Definer = &Context{}
+	var _ Definer = &Object{}
+}
+
 func TestEvalNumber(t *testing.T) {
 
 	cx := NewContext()
@@ -188,13 +208,9 @@ func TestErrorsInFunction(t *testing.T) {
 
 	obj := cx.DefineObject("errs", nil)
 
-	fn := obj.DefineFunction("raise", func(msg string) {
+	obj.DefineFunction("raise", func(msg string) {
 		panic(msg)
 	})
-
-	if fn.Name != "raise" {
-		t.Fatalf("expected func object to have name")
-	}
 
 	err := cx.Exec(`errs.raise('BANG')`)
 	if err == nil {
@@ -204,7 +220,7 @@ func TestErrorsInFunction(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected the error to be an ErrorReport but got: %T %v", err, err)
 	}
-	exp := fmt.Sprintf("Error: %s: BANG", fn.Name)
+	exp := fmt.Sprintf("Error: raise: BANG")
 	if r.Message != exp {
 		t.Fatalf(`expected error message to be %q but got %q`, exp, r.Message)
 	}
