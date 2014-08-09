@@ -4,36 +4,73 @@
 
 JSAPI is a Go ([golang](http://golang.org)) package for embedding the spidermonkey javascript interpreter into your Go projects.
 
-## Example
+## Quick Tour
 
-Here is a quick example of exposing a simple Go function to javascript, calling the function and printing the resulting value out.
+#### Exposing a Go function to javascript
+
+Exposing a simple Go function to javascript, calling the function and printing the resulting value out.
 
 ```go
-package main
+cx := jsapi.NewContext()
 
-import( 
-	"fmt"
-	"github.com/chrisfarms/jsapi"
-)
+cx.DefineFunction("add", func(a, b int) int {
+	return a + b
+})
 
-func main() {
+var result int
+cx.Eval(`add(1,2)`, &result) // call the go func from js
 
-	cx := jsapi.NewContext()
+fmt.Println("result is", result)
+```
 
-	cx.DefineFunction("add", func(a, b int) int {
-		return a + b
-	})
-	
-	var result int
-	cx.Eval(`add(1,2)`, &result)
+#### Mapping a Go struct to a javascript Object
 
-	fmt.Println("result is", result)
+It is often useful to have simple struct properties visible from both Go-land and JS-land, by passing a struct to `DefineObject` the values will be proxied back and forth:
+
+```go
+type Person struct {
+    Name string
 }
+p := &Person{"jeff"}
+
+cx := jsapi.NewContext()
+
+cx.DefineObject("person", p) // p's public fields exposed
+
+var name string
+cx.Eval(`person.Name`, &name) // Read the name from js
+
+cx.Exec(`person.Name = 'bob'`) // Set the name from js
+```
+
+#### Use a Pool of worker contexts
+
+Avoid bottlenecks in certain loads with Pools:
+
+```go
+// create pool of 8 worker Contexts
+pool := jsapi.NewPool(8) 
+
+// Add a sleep function to all the contexts
+pool.DefineFunction("sleep", func(ms int){
+	time.Sleep(time.Duration(ms) * time.Millisecond)	
+})
+
+// Spawn 100 goroutines to use the pool
+wg := new(sync.WaitGroup)
+for i := 0; i < 100; i++ {
+	wg.Add(1)
+	go func() {
+		pool.Exec(`sleep(10)`)
+		wg.Done()
+	}()
+}
+wg.Wait()
 ```
 
 ## Documentation
 
-See godoc for API documentation.
+See [godoc](http://godoc.org/github.com/chrisfarms/jsapi) for API documentation.
 
 ## Installation
 
@@ -55,7 +92,7 @@ If all went well you should see then `PASS` output from the test run and the pac
 import "github.com/chrisfarms/jsapi"
 ```
 
-
+## 
 
 
 

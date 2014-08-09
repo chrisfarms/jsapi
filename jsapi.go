@@ -1,3 +1,4 @@
+// Package jsapi enables embedding of the spidermonkey javascript engine within Go projects.
 package jsapi
 
 /*
@@ -246,6 +247,13 @@ type Evaluator interface {
 	ExecFrom(r io.Reader) (err error)
 }
 
+// Context is a javascript runtime environment and global namespace. You run javascript 
+// _within_ a context. You can think of it a bit like a tab in a browser, scripts 
+// running in seperate Contexts cannot see or interact with each other.
+//
+// Each Context runs in it's own thread, and setup/teardown of Contexts is not free so
+// for best results you should consider how to make best use of the Contexts and try to
+// keep the number you need to a minimum.
 type Context struct {
 	id    int
 	ptr   *C.JSAPIContext

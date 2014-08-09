@@ -10,6 +10,33 @@ type pfn struct {
 	done chan bool
 }
 
+// Pool implements the Evaluator and Definer interfaces but
+// is backed by a pool of contexts rather than just one.
+// Since each context can only run one thread at a time certain
+// workloads may find the context becomes a bottleneck and using
+// Pool may give a significant performance boost if there are other
+// cpu/cores to take advantage of.
+//
+// It is important to understand that Pool is made up of multiple
+// totally seperate javascript Contexts. These Contexts cannot interact
+// with each other. So for example if you called Exec to set a global 
+// variable it will have only been set in *one* of the contexts within 
+// the pool and there would be no guarentee that you would see it on the
+// next call to Eval/Exec. For these reason there exists EvalAll and ExecAll
+// functions on Pools, which allow for setting up the entire Pool.
+//
+// The general workflow for using Pool would be:
+//
+//     // Create a pool
+//     p := NewPool(4)
+//     // Setup the pool
+//     p.ExecAll(`function MyAwesomeApp(){ .... }`)
+//     // Use the workers without causing side effects to the global namespace
+//     for i := 0; i<100; i++ {
+//         go func(){
+//             p.Exec(`MyAwecomeApp(1)`)
+//         }()
+//     }
 type Pool struct {
 	cxs   []*Context
 	in    chan *pfn
@@ -18,7 +45,7 @@ type Pool struct {
 	Valid bool // is this pool active
 }
 
-// Create a pool of worker contexts.
+// NewPool creates a pool of n worker contexts.
 func NewPool(n int) *Pool {
 	p := &Pool{}
 	p.cxs = make([]*Context, n)
