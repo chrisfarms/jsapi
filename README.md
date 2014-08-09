@@ -2,7 +2,7 @@
 
 ## Overview
 
-JSAPI is a Go ([golang](http://golang.org)) package for embedding the spidermonkey javascript interpreter into your Go projects.
+JSAPI is a Go ([golang](http://golang.org)) package for embedding the spidermonkey javascript interpreter into Go projects.
 
 ## Quick Tour
 
@@ -86,7 +86,7 @@ git clone --recursive https://github.com/chrisfarms/jsapi.git "."
 go install
 ```
 
-If all went well you should see then `PASS` output from the test run and the package can now be installed by running `go install` and used as normal via:
+If all went well you should see the `PASS` output from the test run and the package can now be used as per usual via `go install` and:
 
 ```go
 import "github.com/chrisfarms/jsapi"
