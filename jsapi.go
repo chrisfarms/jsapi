@@ -1,7 +1,7 @@
 package jsapi
 
 /*
-#cgo LDFLAGS: -L./lib -ljsapi -l:libjs.a -lpthread -lstdc++ -ldl
+#cgo LDFLAGS: -L./lib -L./lib/moz/js/src/build-release/dist/lib -ljsapi -l:libjs.a -lpthread -lstdc++ -ldl -l:libnspr4.a
 #include <stdlib.h>
 #include "lib/js.hpp"
 void Init();
@@ -83,6 +83,39 @@ type destroyer interface {
 
 func finalizer(x destroyer){
 	x.Destroy()
+}
+
+//export workerCallback
+func workerCallback(cname *C.char, result *C.char, resultn C.int, errMsg *C.char) {
+	name := C.GoString(cname)
+	w, ok := workers[name]
+	if !ok {
+		panic("a worker called back to nobody!?")
+	}
+	//fmt.Println("GOT A WORKER CALLBACK", name, errMsg)
+	if errMsg != nil {
+		w.wait <- fmt.Errorf("%s: %s", name, C.GoString(errMsg))
+		return
+	}
+	if w.target != nil {
+		err := json.Unmarshal(C.GoBytes(unsafe.Pointer(result), resultn), w.target)
+		if err != nil {
+			w.wait <- err
+			return
+		}
+	}
+	w.wait <- nil
+}
+
+// export workerWait
+func workerWait(cname *C.char) *C.char {
+	name := C.GoString(cname)
+	w, ok := workers[name]
+	if !ok {
+		panic("attempt to wait on a non existant worker")
+	}
+	source := <-w.eval
+	return C.CString(source)
 }
 
 //export callback
@@ -293,6 +326,33 @@ func (cx *Context) Eval(source string, result interface{}) (err error) {
 		err = json.Unmarshal(b, result)
 	})
 	return err
+}
+
+// worker
+var workers = make(map[string]*async)
+type async struct {
+	wait chan error
+	target interface{}
+}
+func (cx *Context) EvalInWorker(source string, result interface{}) (err error) {
+	// alloc C-string
+	csource := C.CString(source)
+	//defer C.free(unsafe.Pointer(csource))
+	name := "eval"
+	cname := C.CString(name)
+	//defer C.free(unsafe.Pointer(cfilename))
+	// eval
+	w := &async{
+		wait: make(chan error, 1),
+		target: result,
+	}
+	workers[name] = w
+	cx.do(func(){
+		if C.JSAPI_EvalJSONWorker(cx.ptr, csource, cname) != C.JSAPI_OK {
+			panic("failed to call evalworker")
+		}
+	})
+	return <-w.wait
 }
 
 // Execute javascript in the context from an io.Reader.

@@ -47,6 +47,7 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/Shape.h"
 #include "vm/WrapperObject.h"
+#include "vm/HelperThreads.h"
 
 struct JSAPIContext {
 	JSRuntime *rt;
@@ -106,23 +107,24 @@ JSObject* JSAPI_DefineObject(JSAPIContext *c, JSObject* parent, char *name){
 }
 
 struct jsonBuffer {
-	JSAPIContext *c;
-	char *str;
+	JSContext* cx;
+	JSObject* o;
+	char* str;
 	uint32_t n;
 };
 
 bool stringifier(const jschar *s, uint32_t n, void *data){
 	jsonBuffer *buf = (jsonBuffer*)data;
-    JSAutoRequest ar(buf->c->cx);
-	JSAutoCompartment ac(buf->c->cx, buf->c->o);
-	RootedString ss(buf->c->cx,JS_NewUCStringCopyN(buf->c->cx, s, n));
-	size_t sn = JS_GetStringEncodingLength(buf->c->cx, ss);
+    JSAutoRequest ar(buf->cx);
+	JSAutoCompartment ac(buf->cx, buf->o);
+	RootedString ss(buf->cx,JS_NewUCStringCopyN(buf->cx, s, n));
+	size_t sn = JS_GetStringEncodingLength(buf->cx, ss);
 	buf->str = (char*)realloc(buf->str, (buf->n + sn) * sizeof(char));
 	if( buf->str == NULL){
 		printf("could not realloc during stringify");
 		return false;
 	}
-	buf->n = JS_EncodeStringToBuffer(buf->c->cx, ss, buf->str+buf->n, sn) + buf->n;
+	buf->n = JS_EncodeStringToBuffer(buf->cx, ss, buf->str+buf->n, sn) + buf->n;
 	return true;
 }
 
@@ -151,7 +153,8 @@ bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 	// convert to json 
 	jsonBuffer buf;
 	buf.str = NULL;
-	buf.c = c;
+	buf.cx = c->cx;
+	buf.o = c->o;
 	buf.n = 0;
 	RootedObject replacer(c->cx);
 	RootedValue undefined(c->cx);
@@ -243,7 +246,8 @@ bool wrapGoSetter(JSContext *cx,  JS::Handle<JSObject*> obj, JS::Handle<jsid> pr
 	// convert to json 
 	jsonBuffer buf;
 	buf.str = NULL;
-	buf.c = c;
+	buf.cx = c->cx;
+	buf.o = c->o;
 	buf.n = 0;
 	RootedObject replacer(c->cx);
 	RootedValue undefined(c->cx);
@@ -380,7 +384,8 @@ jerr JSAPI_EvalJSON(JSAPIContext *c, char *source, char *filename, char **outstr
 	// convert to json 
 	jsonBuffer buf;
 	buf.str = NULL;
-	buf.c = c;
+	buf.cx = c->cx;
+	buf.o = c->o;
 	buf.n = 0;
 	RootedObject replacer(c->cx);
 	RootedValue undefined(c->cx);
@@ -409,4 +414,106 @@ jerr JSAPI_Eval(JSAPIContext *c, char *source, char *filename){
 }
 
 
+///////////////////////////////// WORKER
 
+
+struct WorkerInput {
+    JSRuntime* runtime;
+	char* source;
+	char* name;
+
+    WorkerInput(JSRuntime* runtime, char* source, char* name)
+      : runtime(runtime), source(source), name(name)
+    {}
+
+    ~WorkerInput() {
+    }
+};
+
+static void EvalWorker(void *arg){
+    WorkerInput *input = (WorkerInput *) arg;
+	// new rt
+    JSRuntime *rt = JS_NewRuntime(8L * 1024L * 1024L, 2L * 1024L * 1024L, input->runtime);
+    if (!rt) {
+        js_delete(input);
+        return;
+    }
+	// new context
+    JSContext *cx = JS_NewContext(rt, 8192);
+    if (!cx) {
+        JS_DestroyRuntime(rt);
+        js_delete(input);
+        return;
+    }
+	{
+		JSAutoRequest ar(cx);
+		// Create the global object
+		JSObject *o = JS_NewGlobalObject(cx, &global_class, nullptr, JS::DontFireOnNewGlobalHook);
+		JSAutoCompartment ac(cx, o);
+		RootedObject global(cx, o);
+		if (!global) {
+			go_worker_callback(input->name, NULL, 0, "failed to make global");
+			break;
+		}
+		if (!JS_InitStandardClasses(cx, global)) {
+			go_worker_callback(input->name, NULL, 0, "failed to init global classes");
+			break;
+		}
+		JS_FireOnNewGlobalObject(cx, global);
+	}
+	// worker thread
+    do {
+		char* source = go_worker_wait(input->name);
+		// eval
+		JSAutoRequest ar(cx);
+		RootedValue rval(cx);
+		if (!JS_EvaluateScript(cx, global, input->source, strlen(input->source), input->name, 0, &rval)) {
+			go_worker_callback(input->name, NULL, 0, "error in js land FIXME to show real error");
+			continue;
+		}
+		// convert to json 
+		jsonBuffer buf;
+		buf.str = NULL;
+		buf.cx = cx;
+		buf.o = global;
+		buf.n = 0;
+		RootedObject replacer(cx);
+		RootedValue undefined(cx);
+		jerr err = JSAPI_OK;
+		if( !JS_Stringify(cx, &rval, replacer, undefined, stringifier, &buf) ){
+			go_worker_callback(input->name, NULL, 0, "failed to serialize result");
+			if (buf.str != NULL) {
+				free(buf.str)
+			}
+			continue;
+		}
+		// callback to go with result
+		go_worker_callback(input->name, buf.str, buf.n, NULL);
+		// release
+		free(buf.str);
+    } while (1);
+
+    JS_DestroyContext(cx);
+    JS_DestroyRuntime(rt);
+    js_delete(input);
+
+	return;
+}
+
+Vector<PRThread *, 0, SystemAllocPolicy> workerThreads;
+
+jerr JSAPI_EvalJSONWorker(JSAPIContext *c, char *source, char *name){
+
+    WorkerInput *input = js_new<WorkerInput>(c->rt, source, name);
+    if (!input) {
+        return JSAPI_FAIL;
+	}
+
+    PRThread *thread = PR_CreateThread(PR_USER_THREAD, EvalWorker, input,
+                                       PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
+    if (!thread || !workerThreads.append(thread)) {
+        return JSAPI_FAIL;
+	}
+
+    return JSAPI_OK;
+}

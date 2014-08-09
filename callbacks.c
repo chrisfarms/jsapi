@@ -6,5 +6,6 @@ void Init(){
 	go_error = reporter;
 	go_getter = getprop;
 	go_setter = setprop;
+	go_worker_callback = workerCallback;
 }
 
