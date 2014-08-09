@@ -8,6 +8,10 @@ MOZJS=moz/js/src
 MOZBUILD=build-release
 MOZDIST=$MOZJS/$MOZBUILD/dist
 
+if [[ ! -e "${LIB}/${MOZJS}" ]]; then
+	git submodule update --init
+fi
+
 if [[ ! -e "${LIB}/libjs.a" ]]; then (
 	cd $LIB/$MOZJS && 
 	rm -rf $MOZBUILD &&
