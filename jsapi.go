@@ -424,20 +424,7 @@ func (cx *Context) defineFunction(name string, fun interface{}, id *C.JSObject) 
 	}
 	f.t = f.v.Type()
 	if f.t.Kind() != reflect.Func {
-		panic("X is not a valid function type")
-	}
-	// check inarg types are acceptable
-	for i := 0; i < f.t.NumIn(); i++ {
-		switch f.t.In(i).Kind() {
-		case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16,
-			reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8,
-			reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32,
-			reflect.Float64, reflect.Interface, reflect.Map, reflect.Slice,
-			reflect.String:
-			// ok
-		default:
-			panic("X is not a valid argument type for javascript interop")
-		}
+		panic("not a valid function type")
 	}
 	f.name = "[anon]"
 	cx.do(func(ptr *C.JSAPIContext) {
