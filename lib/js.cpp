@@ -53,6 +53,7 @@ struct JSAPIContext {
 	JSRuntime *rt;
 	JSContext *cx;
 	JSObject *o;
+	int id;
 };
 
 #include "js.hpp"
@@ -301,7 +302,10 @@ jerr JSAPI_DefineProperty(JSAPIContext *c, JSObject* parent, char *name){
 static JSRuntime *grt = NULL;
 static JSContext *gcx = NULL;
 
-// Inits the js runtime and returns the thread id it's running on
+// Inits the js runtime
+// The docs say we need to create the first rt and cx on
+// the main thread... seems a bit weird to just have these
+// lying around but hey-ho
 jerr JSAPI_Init() {
     if (!JS_Init()){
 		return JSAPI_FAIL;
@@ -309,6 +313,11 @@ jerr JSAPI_Init() {
     // Create global runtime
     grt = JS_NewRuntime(2048L * 1024L * 1024L, 0);
     if (!grt) {
+		return JSAPI_FAIL;
+	}
+	// Create global context
+	gcx = JS_NewContext(grt, 8192);
+	if (!gcx) {
 		return JSAPI_FAIL;
 	}
 	return JSAPI_OK;
@@ -321,40 +330,13 @@ jerr JSAPI_ThreadCanAccessRuntime() {
 	return JSAPI_OK;
 }
 
-
-JSAPIContext* JSAPI_NewContext(){
-	JSAPIContext *c = (JSAPIContext*)malloc(sizeof(JSAPIContext));
-	// use global runtime
-	c->rt = grt;
-	// Create a new context
-	c->cx = JS_NewContext(c->rt, 8192);
-	if (!c->cx) {
-		printf("failed to make cx\n");
-		return NULL;
+jerr JSAPI_ThreadCanAccessContext(JSAPIContext* c) {
+    if( !CurrentThreadCanAccessRuntime(c->rt) ){
+		return JSAPI_FAIL;
 	}
-	// Start request
-	JSAutoRequest ar(c->cx);
-	/* Erros */
-	JS_SetErrorReporter(c->cx, reportError);
-	JS::SetOutOfMemoryCallback(c->rt, reportOOM, c);
-	// Create the global object
-	c->o = JS_NewGlobalObject(c->cx, &global_class, nullptr, JS::DontFireOnNewGlobalHook);
-	JSAutoCompartment ac(c->cx, c->o);
-	RootedObject global(c->cx, c->o);
-	if (!global) {
-		printf("failed to make global");
-		return NULL;
-	}
-	if (!JS_InitStandardClasses(c->cx, global)) {
-		printf("failed to init global classes\n");
-		return NULL;
-	}
-	c->o = global;
-	JS_FireOnNewGlobalObject(c->cx, global);
-	// store context
-	JS_SetContextPrivate(c->cx, c);
-	return c;
+	return JSAPI_OK;
 }
+
 
 jerr JSAPI_DestroyContext(JSAPIContext *c){
 	if( c != NULL ){
@@ -419,97 +401,79 @@ jerr JSAPI_Eval(JSAPIContext *c, char *source, char *filename){
 
 struct WorkerInput {
     JSRuntime* runtime;
-	char* source;
-	char* name;
+	int id;
 
-    WorkerInput(JSRuntime* runtime, char* source, char* name)
-      : runtime(runtime), source(source), name(name)
+    WorkerInput(JSRuntime* runtime, int id)
+      : runtime(runtime), id(id)
     {}
 
     ~WorkerInput() {
     }
 };
 
-static void EvalWorker(void *arg){
-    WorkerInput *input = (WorkerInput *) arg;
-	// new rt
-    JSRuntime *rt = JS_NewRuntime(8L * 1024L * 1024L, 2L * 1024L * 1024L, input->runtime);
-    if (!rt) {
-        js_delete(input);
-        return;
-    }
-	// new context
-    JSContext *cx = JS_NewContext(rt, 8192);
-    if (!cx) {
-        JS_DestroyRuntime(rt);
-        js_delete(input);
-        return;
-    }
-	{
-		JSAutoRequest ar(cx);
+static void ContextWorker(void *arg){
+	bool ok = false;
+	JSAPIContext c;
+	WorkerInput *input = (WorkerInput *) arg;
+	c.id = input->id;
+	do {
+		// new rt with global parent runtime
+		c.rt = JS_NewRuntime(8L * 1024L * 1024L, 2L * 1024L * 1024L, input->runtime);
+		if (!c.rt) {
+			go_worker_fail(c.id, "failed to make global");
+			break;
+		}
+		// new context
+		c.cx = JS_NewContext(c.rt, 8192);
+		if (!c.cx) {
+			go_worker_fail(c.id, "failed to make global");
+			break;
+		}
+		JSAutoRequest ar(c.cx);
+		// error handlers
+		JS_SetErrorReporter(c.cx, reportError);
+		JS::SetOutOfMemoryCallback(c.rt, reportOOM, &c);
 		// Create the global object
-		JSObject *o = JS_NewGlobalObject(cx, &global_class, nullptr, JS::DontFireOnNewGlobalHook);
-		JSAutoCompartment ac(cx, o);
-		RootedObject global(cx, o);
+		c.o = JS_NewGlobalObject(c.cx, &global_class, nullptr, JS::DontFireOnNewGlobalHook);
+		JSAutoCompartment ac(c.cx, c.o);
+		RootedObject global(c.cx, c.o);
 		if (!global) {
-			go_worker_callback(input->name, NULL, 0, "failed to make global");
+			go_worker_fail(c.id, "failed to make global");
 			break;
 		}
-		if (!JS_InitStandardClasses(cx, global)) {
-			go_worker_callback(input->name, NULL, 0, "failed to init global classes");
+		if (!JS_InitStandardClasses(c.cx, global)) {
+			go_worker_fail(c.id, "failed to init global classes");
 			break;
 		}
-		JS_FireOnNewGlobalObject(cx, global);
-	}
+		JS_FireOnNewGlobalObject(c.cx, global);
+		JS_SetContextPrivate(c.cx, &c);
+		ok = true;
+	} while(0);
 	// worker thread
-    do {
-		char* source = go_worker_wait(input->name);
-		// eval
-		JSAutoRequest ar(cx);
-		RootedValue rval(cx);
-		if (!JS_EvaluateScript(cx, global, input->source, strlen(input->source), input->name, 0, &rval)) {
-			go_worker_callback(input->name, NULL, 0, "error in js land FIXME to show real error");
-			continue;
-		}
-		// convert to json 
-		jsonBuffer buf;
-		buf.str = NULL;
-		buf.cx = cx;
-		buf.o = global;
-		buf.n = 0;
-		RootedObject replacer(cx);
-		RootedValue undefined(cx);
-		jerr err = JSAPI_OK;
-		if( !JS_Stringify(cx, &rval, replacer, undefined, stringifier, &buf) ){
-			go_worker_callback(input->name, NULL, 0, "failed to serialize result");
-			if (buf.str != NULL) {
-				free(buf.str)
-			}
-			continue;
-		}
-		// callback to go with result
-		go_worker_callback(input->name, buf.str, buf.n, NULL);
-		// release
-		free(buf.str);
-    } while (1);
-
-    JS_DestroyContext(cx);
-    JS_DestroyRuntime(rt);
+	if( ok ){
+	    go_worker_wait(input->id, &c);
+	}
+	// Free
+	if( c.cx ){
+	    JS_DestroyContext(c.cx);
+	}
+	if( c.rt ){
+	    JS_DestroyRuntime(c.rt);
+	}
     js_delete(input);
-
 	return;
 }
 
 Vector<PRThread *, 0, SystemAllocPolicy> workerThreads;
 
-jerr JSAPI_EvalJSONWorker(JSAPIContext *c, char *source, char *name){
+jerr JSAPI_NewContext(int id){
 
-    WorkerInput *input = js_new<WorkerInput>(c->rt, source, name);
+    WorkerInput *input = js_new<WorkerInput>(grt, id);
     if (!input) {
         return JSAPI_FAIL;
 	}
 
-    PRThread *thread = PR_CreateThread(PR_USER_THREAD, EvalWorker, input,
+    PRThread *thread = PR_CreateThread(PR_USER_THREAD, ContextWorker, input,
                                        PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
     if (!thread || !workerThreads.append(thread)) {
         return JSAPI_FAIL;

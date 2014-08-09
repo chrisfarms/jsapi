@@ -25,23 +25,6 @@ func TestEvalNumber(t *testing.T) {
 
 }
 
-func TestEvalNumberInWorker(t *testing.T) {
-
-	cx := NewContext()
-	defer cx.Destroy()
-
-	var i int
-	err := cx.EvalInWorker(`1+1`, &i)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if i != 2 {
-		t.Fatalf("expected 1+1 to eval to 2 but got %d", i)
-	}
-
-}
-
 func TestEvalString(t *testing.T) {
 
 	cx := NewContext()
