@@ -1,6 +1,6 @@
 package jsapi_test
 
-import(
+import (
 	"fmt"
 	"github.com/chrisfarms/jsapi"
 )
@@ -38,7 +38,7 @@ func ExampleObject_DefineObject() {
 	// Create a context with a global variable "o"
 	// pointing to an empty object
 	cx := jsapi.NewContext()
-	o1 := cx.DefineObject("o", nil)
+	o1, _ := cx.DefineObject("o", nil)
 
 	// Add a "x" property to the object containing
 	// another empty object
@@ -53,7 +53,7 @@ func ExampleContext_DefineFunction_Simple() {
 	cx := jsapi.NewContext()
 
 	// Add a really basic 'print' function to the context
-	cx.DefineFunction("print", func(s string){
+	cx.DefineFunction("print", func(s string) {
 		fmt.Println(s)
 	})
 
@@ -88,7 +88,7 @@ func ExampleObject_DefineFunction_Vari() {
 	// a bit by creating an object for our 'fmt'
 	// namespace, then creating a variadic function in js-land
 	// that returns a string
-	ns := cx.DefineObject("fmt", nil)
+	ns, _ := cx.DefineObject("fmt", nil)
 	ns.DefineFunction("sprintf", func(layout string, args ...interface{}) string {
 		return fmt.Sprintf(layout, args...)
 	})

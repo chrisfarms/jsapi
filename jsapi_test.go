@@ -102,7 +102,7 @@ func TestObjectWithIntFunction(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	math := cx.DefineObject("math", nil)
+	math, _ := cx.DefineObject("math", nil)
 
 	math.DefineFunction("add", func(a int, b int) int {
 		return a + b
@@ -128,7 +128,7 @@ func TestProxyObjectWithFunction(t *testing.T) {
 		Name string
 	}
 	p := &person{"bob"}
-	math := cx.DefineObject("math", p)
+	math, _ := cx.DefineObject("math", p)
 
 	math.DefineFunction("add", func(a int, b int) int {
 		return a + b
@@ -150,7 +150,7 @@ func TestObjectApplyFunction(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	math := cx.DefineObject("math", nil)
+	math, _ := cx.DefineObject("math", nil)
 
 	math.DefineFunction("add", func(a int, b int) int {
 		return a + b
@@ -172,8 +172,8 @@ func TestNestedObjects(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	parent := cx.DefineObject("parent", nil)
-	child := parent.DefineObject("child", nil)
+	parent, _ := cx.DefineObject("parent", nil)
+	child, _ := parent.DefineObject("child", nil)
 
 	child.DefineFunction("greet", func() string {
 		return "hello"
@@ -195,7 +195,7 @@ func TestObjectWithVaridicFunction(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	obj := cx.DefineObject("fmt", nil)
+	obj, _ := cx.DefineObject("fmt", nil)
 
 	obj.DefineFunction("sprintf", func(format string, args ...interface{}) string {
 		return fmt.Sprintf(format, args...)
@@ -253,7 +253,7 @@ func TestErrorsInFunction(t *testing.T) {
 	cx := NewContext()
 	defer cx.Destroy()
 
-	obj := cx.DefineObject("errs", nil)
+	obj, _ := cx.DefineObject("errs", nil)
 
 	obj.DefineFunction("raise", func(msg string) {
 		panic(msg)
@@ -447,8 +447,8 @@ func TestStructArgsPtr(t *testing.T) {
 	defer cx.Destroy()
 
 	type args struct {
-		A int
-		B int
+		A  int
+		B  int
 		Ok bool
 	}
 
@@ -475,8 +475,8 @@ func TestStructArgsValue(t *testing.T) {
 	defer cx.Destroy()
 
 	type args struct {
-		A int
-		B int
+		A  int
+		B  int
 		Ok bool
 	}
 
@@ -506,7 +506,7 @@ func TestRawType(t *testing.T) {
 		return `{"ok":true}`
 	})
 
-	var res struct{
+	var res struct {
 		Ok bool
 	}
 	err := cx.Eval(`raw()`, &res)

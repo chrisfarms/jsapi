@@ -14,16 +14,17 @@ typedef struct {
 	void* rt;
 	void* cx;
 	JSObject* o;
+	JSObject* objs;
 	int id;
 } JSAPIContext;
 #endif
 
 typedef int jerr;
 
-typedef int (*GoFun)(JSAPIContext* c, JSObject* o, char* name, char* s, int len, char** result);
+typedef int (*GoFun)(JSAPIContext* c, uint32_t fid, char* name, char* s, int len, char** result);
 typedef void (*GoErr)(JSAPIContext* c, char* filename, unsigned int line, char* msg);
-typedef int (*GoGet)(JSAPIContext* c, JSObject* o, char* name, char** result);
-typedef int (*GoSet)(JSAPIContext* c, JSObject* o, char* name, char* s, int len, char** result);
+typedef int (*GoGet)(JSAPIContext* c, uint32_t oid, char* name, char** result);
+typedef int (*GoSet)(JSAPIContext* c, uint32_t oid, char* name, char* s, int len, char** result);
 typedef void (*GoWorkWait)(int id, JSAPIContext* c);
 typedef void (*GoWorkFail)(int id, char* err);
 
@@ -45,9 +46,9 @@ jerr JSAPI_DestroyContext(JSAPIContext* c);
 jerr JSAPI_EvalJSON(JSAPIContext* c, char* source, char* filename, char** outstr, int* outlen);
 jerr JSAPI_Eval(JSAPIContext* c, char* source, char* filename);
 void JSAPI_FreeChar(JSAPIContext* c, char* p);
-jerr JSAPI_DefineFunction(JSAPIContext* c, JSObject* parent, char* name);
-jerr JSAPI_DefineProperty(JSAPIContext* c, JSObject* parent, char* name);
-JSObject* JSAPI_DefineObject(JSAPIContext* c, JSObject* parent, char* name);
+jerr JSAPI_DefineFunction(JSAPIContext* c, uint32_t pid, char* name, uint32_t fid);
+jerr JSAPI_DefineProperty(JSAPIContext* c, uint32_t pid, char* name);
+jerr JSAPI_DefineObject(JSAPIContext* c, uint32_t pid, char* name, uint32_t oid);
 
 #ifdef __cplusplus
 }

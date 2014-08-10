@@ -19,8 +19,8 @@ type pfn struct {
 //
 // It is important to understand that Pool is made up of multiple
 // totally seperate javascript Contexts. These Contexts cannot interact
-// with each other. So for example if you called Exec to set a global 
-// variable it will have only been set in *one* of the contexts within 
+// with each other. So for example if you called Exec to set a global
+// variable it will have only been set in *one* of the contexts within
 // the pool and there would be no guarentee that you would see it on the
 // next call to Eval/Exec. For these reason there exists EvalAll and ExecAll
 // functions on Pools, which allow for setting up the entire Pool.
@@ -76,20 +76,28 @@ func NewPool(n int) *Pool {
 
 // Create a go function mapping in ALL contexts within the pool.
 // See context's description for more details.
-func (p *Pool) DefineFunction(name string, fun interface{}) {
+func (p *Pool) DefineFunction(name string, fun interface{}) (err error) {
 	for _, cx := range p.cxs {
-		cx.DefineFunction(name, fun)
+		err = cx.DefineFunction(name, fun)
+		if err != nil {
+			return
+		}
 	}
+	return nil
 }
 
 // Create an object in ALL contexts within the pool.
 // See context's description for more details.
-func (p *Pool) DefineObject(name string, proxy interface{}) Definer {
+func (p *Pool) DefineObject(name string, proxy interface{}) (Definer, error) {
 	op := &ObjectPool{p, make([]*Object, p.n)}
 	for i, cx := range p.cxs {
-		op.objects[i] = cx.DefineObject(name, proxy).(*Object)
+		o, err := cx.DefineObject(name, proxy)
+		if err != nil {
+			return nil, err
+		}
+		op.objects[i] = o.(*Object)
 	}
-	return op
+	return op, nil
 }
 
 // Execute source js in the first available worker context and return
@@ -184,16 +192,24 @@ type ObjectPool struct {
 	objects []*Object
 }
 
-func (op *ObjectPool) DefineFunction(name string, fun interface{}) {
+func (op *ObjectPool) DefineFunction(name string, fun interface{}) (err error) {
 	for _, o := range op.objects {
-		o.DefineFunction(name, fun)
+		err = o.DefineFunction(name, fun)
+		if err != nil {
+			return
+		}
 	}
+	return
 }
 
-func (op *ObjectPool) DefineObject(name string, proxy interface{}) Definer {
+func (op *ObjectPool) DefineObject(name string, proxy interface{}) (Definer, error) {
 	op2 := &ObjectPool{op.p, make([]*Object, op.p.n)}
 	for i, o := range op.objects {
-		op2.objects[i] = o.DefineObject(name, proxy).(*Object)
+		o, err := o.DefineObject(name, proxy)
+		if err != nil {
+			return nil, err
+		}
+		op2.objects[i] = o.(*Object)
 	}
-	return op2
+	return op2, nil
 }

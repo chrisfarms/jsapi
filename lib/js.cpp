@@ -53,6 +53,7 @@ struct JSAPIContext {
 	JSRuntime *rt;
 	JSContext *cx;
 	JSObject *o;
+	JSObject *objs;
 	int id;
 };
 
@@ -70,10 +71,12 @@ using mozilla::PodCopy;
 using mozilla::PodEqual;
 using mozilla::UniquePtr;
 
+#define OBJECT_ID_KEY "__oid__"
+
 
 /* The class of the global object. */
 static const JSClass global_class = {
-    "global", JSCLASS_NEW_RESOLVE | JSCLASS_GLOBAL_FLAGS,
+    "global", JSCLASS_NEW_RESOLVE | JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_PRIVATE,
     JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub,
@@ -96,15 +99,68 @@ void reportOOM(JSContext *cx, void *data) {
 	go_error(c, "__fatal__", 0, "spidermonkey ran out of memory"); 
 }
 
-JSObject* JSAPI_DefineObject(JSAPIContext *c, JSObject* parent, char *name){
-	if( parent == NULL ){
-		parent = c->o;
-	}
+JSObject* idToObj(JSAPIContext* c, uint32_t id){
 	JSAutoRequest ar(c->cx);
 	JSAutoCompartment ac(c->cx, c->o);
-	RootedObject p(c->cx, parent);
-	JSObject* obj = JS_DefineObject(c->cx, p, name, nullptr, JS::NullPtr(), 0);
-	return obj;
+	RootedObject objs(c->cx, c->objs);
+	// lookup parent using global key
+	// (this is a bit hacky) but it's the most stable way I've found
+	// to pass ids around that also handles GC perfectly
+	RootedValue v(c->cx);
+	if (!JS_GetElement(c->cx, objs, id, &v) ){
+		fprintf(stderr, "fatal: could not lookup object for id %d", id);
+		return NULL;
+	}
+	if( v.isNull() || v.isUndefined() ){
+		fprintf(stderr, "fatal: could not find object for id %d\n", id);
+		return 0;
+	}
+	if( !v.isObject() ){
+		fprintf(stderr, "fatal: object lookup for id %d returned unexpected type\n", id);
+		return 0;
+	}
+	return &v.toObject();
+}
+
+uint32_t objId(JSAPIContext* c, HandleObject obj){
+	JSAutoRequest ar(c->cx);
+	JSAutoCompartment ac(c->cx, c->o);
+	RootedValue idval(c->cx);
+	if( !JS_GetProperty(c->cx, obj, OBJECT_ID_KEY, &idval) ){
+		fprintf(stderr, "fatal: failed to lookup object's id\n");
+		return 0;
+	}
+	if( idval.isNull() || idval.isUndefined() ){
+		fprintf(stderr, "fatal: object does not have an id\n");
+		return 0;
+	}
+	return idval.toInt32();
+}
+
+jerr JSAPI_DefineObject(JSAPIContext *c, uint32_t pid, char* name, uint32_t id){
+	JSAutoRequest ar(c->cx);
+	JSAutoCompartment ac(c->cx, c->o);
+	RootedObject p(c->cx, idToObj(c, pid));
+	// create object
+	RootedObject obj(c->cx, JS_DefineObject(c->cx, p, name, nullptr, JS::NullPtr(), 0));
+	bool ok = JS_DefineProperty(
+			c->cx,           // context
+			obj,             // prop's owner
+			OBJECT_ID_KEY,   // prop name
+			id,              // initial value
+			JSPROP_READONLY, // flags
+			nullptr,         // getter callback
+			nullptr          // setter callback
+	);
+	if( !ok ){
+		return JSAPI_FAIL;
+	}
+	// assign to global hash
+	RootedObject h(c->cx, c->objs);
+	if (!JS_SetElement(c->cx, h, id, obj) ){
+		return JSAPI_FAIL;
+	}
+	return JSAPI_OK;
 }
 
 struct jsonBuffer {
@@ -141,6 +197,7 @@ bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 		fprintf(stderr, "could not find callee name");
 		return false;
 	}
+	RootedValue out(cx);
 	RootedString namestr(c->cx, ToString(c->cx, nameval));
     JSAutoByteString bytes;
 	char *name = bytes.encodeUtf8(c->cx, namestr); 
@@ -163,8 +220,7 @@ bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 	// send to go and parse resulting json
 	bool ok = true;
 	char *result = NULL;
-	RootedValue out(cx);
-	if( go_callback(c, JS_THIS_OBJECT(c->cx, vp), name, buf.str, int(buf.n), &result) ){
+	if( go_callback(c, objId(c, callee), name, buf.str, int(buf.n), &result) ){
 		if( strlen(result) > 0 ){
 			RootedString resultstr(c->cx, JS_NewStringCopyZ(c->cx, result));
 			if( JS_ParseJSON(c->cx, resultstr, &out) ){
@@ -187,14 +243,23 @@ bool wrapGoFunction(JSContext *cx, unsigned argc, JS::Value *vp) {
 	return ok;
 }
 
-jerr JSAPI_DefineFunction(JSAPIContext *c, JSObject* parent, char *name){
-	if( parent == NULL ){
-		parent = c->o;
-	}
+jerr JSAPI_DefineFunction(JSAPIContext *c, uint32_t pid, char* name, uint32_t fid){
 	JSAutoRequest ar(c->cx);
 	JSAutoCompartment ac(c->cx, c->o);
-	RootedObject p(c->cx, (JSObject*) parent);
-	JS_DefineFunction(c->cx, p, name, wrapGoFunction, 0, 0);
+	RootedObject p(c->cx, idToObj(c, pid));
+	RootedObject fun(c->cx, JS_DefineFunction(c->cx, p, name, wrapGoFunction, 0, 0));
+	bool ok = JS_DefineProperty(
+			c->cx,           // context
+			fun,             // prop's owner
+			OBJECT_ID_KEY,   // prop name
+			fid,             // initial value
+			JSPROP_READONLY, // flags
+			nullptr,         // getter callback
+			nullptr          // setter callback
+	);
+	if( !ok ){
+		return JSAPI_FAIL;
+	}
 	return JSAPI_OK;
 }
 
@@ -202,7 +267,7 @@ bool wrapGoGetter(JSContext *cx,  JS::HandleObject obj, JS::Handle<jsid> propid,
 	JSAPIContext *c = (JSAPIContext*)JS_GetContextPrivate(cx);
 	JSAutoRequest ar(cx);
 	JSAutoCompartment ac(cx, c->o);
-	// get name
+	// get property name
     RootedValue idvalue(cx, IdToValue(propid));
     RootedString idstring(cx, ToString(cx, idvalue));
     JSAutoByteString idstr;
@@ -214,7 +279,7 @@ bool wrapGoGetter(JSContext *cx,  JS::HandleObject obj, JS::Handle<jsid> propid,
 	bool ok = true;
 	char* result = NULL;
 	RootedValue out(cx);
-	if( go_getter(c, obj, idstr.ptr(), &result) ){
+	if( go_getter(c, objId(c, obj), idstr.ptr(), &result) ){
 		if( strlen(result) > 0 ){
 			RootedString resultstr(c->cx, JS_NewStringCopyZ(c->cx, result));
 			if( JS_ParseJSON(c->cx, resultstr, &out) ){
@@ -257,7 +322,7 @@ bool wrapGoSetter(JSContext *cx,  JS::Handle<JSObject*> obj, JS::Handle<jsid> pr
 	bool ok = true;
 	char* result = NULL;
 	RootedValue out(cx);
-	if( go_setter(c, obj, idstr.ptr(), buf.str, int(buf.n), &result) ){
+	if( go_setter(c, objId(c, obj), idstr.ptr(), buf.str, int(buf.n), &result) ){
 		if( strlen(result) > 0 ){
 			RootedString resultstr(c->cx, JS_NewStringCopyZ(c->cx, result));
 			if( JS_ParseJSON(c->cx, resultstr, &out) ){
@@ -276,13 +341,10 @@ bool wrapGoSetter(JSContext *cx,  JS::Handle<JSObject*> obj, JS::Handle<jsid> pr
 	return ok;
 }
 
-jerr JSAPI_DefineProperty(JSAPIContext *c, JSObject* parent, char *name){
-	if( parent == NULL ){
-		parent = c->o;
-	}
+jerr JSAPI_DefineProperty(JSAPIContext *c, uint32_t pid, char *name){
 	JSAutoRequest ar(c->cx);
 	JSAutoCompartment ac(c->cx, c->o);
-	RootedObject p(c->cx, parent);
+	RootedObject p(c->cx, idToObj(c, pid));
 	RootedValue undefined(c->cx, UndefinedValue());
 	bool ok = JS_DefineProperty(
 			c->cx,        // context
@@ -360,7 +422,7 @@ jerr JSAPI_EvalJSON(JSAPIContext *c, char *source, char *filename, char **outstr
     RootedObject global(c->cx, c->o);
 	RootedValue rval(c->cx);
 	// eval
-	if (!JS_EvaluateScript(c->cx, global, source, strlen(source), filename, 0, &rval)) {
+	if (!JS_EvaluateScript(c->cx, global, source, strlen(source), filename, 1, &rval)) {
 		return JSAPI_FAIL;
 	}
 	// convert to json 
@@ -389,7 +451,7 @@ jerr JSAPI_Eval(JSAPIContext *c, char *source, char *filename){
     RootedObject global(c->cx, c->o);
 	RootedValue rval(c->cx);
 	// eval
-	if (!JS_EvaluateScript(c->cx, global, source, strlen(source), filename, 0, &rval)) {
+	if (!JS_EvaluateScript(c->cx, global, source, strlen(source), filename, 1, &rval)) {
 		return JSAPI_FAIL;
 	}
 	return JSAPI_OK;
@@ -445,8 +507,22 @@ static void ContextWorker(void *arg){
 			go_worker_fail(c.id, "failed to init global classes");
 			break;
 		}
+		js::SetDefaultObjectForContext(c.cx, global);
 		JS_FireOnNewGlobalObject(c.cx, global);
 		JS_SetContextPrivate(c.cx, &c);
+		// Add objs store
+		c.objs = JS_NewArrayObject(c.cx, 0);
+		RootedValue objsv(c.cx, OBJECT_TO_JSVAL(c.objs));
+		if (!JS_SetProperty(c.cx, global, "__objdefs__", objsv) ){
+			go_worker_fail(c.id, "failed to create objdefs store");
+			break;
+		}
+		RootedValue globalv(c.cx, OBJECT_TO_JSVAL(c.o));
+		RootedObject objs(c.cx, c.objs);
+		if (!JS_SetElement(c.cx, objs, 0, globalv) ){
+			go_worker_fail(c.id, "failed to assign global to the objdefs store");
+			break;
+		}
 		ok = true;
 	} while(0);
 	// worker thread

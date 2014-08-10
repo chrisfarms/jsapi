@@ -108,7 +108,7 @@ func TestPoolObjectWithIntFunction(t *testing.T) {
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
 
-	math := cx.DefineObject("math", nil)
+	math, _ := cx.DefineObject("math", nil)
 
 	math.DefineFunction("add", func(a int, b int) int {
 		return a + b
@@ -130,8 +130,8 @@ func TestPoolNestedObjects(t *testing.T) {
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
 
-	parent := cx.DefineObject("parent", nil)
-	child := parent.DefineObject("child", nil)
+	parent, _ := cx.DefineObject("parent", nil)
+	child, _ := parent.DefineObject("child", nil)
 
 	child.DefineFunction("greet", func() string {
 		return "hello"
@@ -153,7 +153,7 @@ func TestPoolObjectWithVaridicFunction(t *testing.T) {
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
 
-	obj := cx.DefineObject("fmt", nil)
+	obj, _ := cx.DefineObject("fmt", nil)
 
 	obj.DefineFunction("sprintf", func(format string, args ...interface{}) string {
 		return fmt.Sprintf(format, args...)
@@ -211,7 +211,7 @@ func TestPoolErrorsInFunction(t *testing.T) {
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
 
-	obj := cx.DefineObject("errs", nil)
+	obj, _ := cx.DefineObject("errs", nil)
 
 	obj.DefineFunction("raise", func(msg string) {
 		panic(msg)
@@ -403,23 +403,22 @@ type person struct {
 	Name string
 }
 
-func (p *person) add(a,b int) int {
+func (p *person) add(a, b int) int {
 	return a + b
 }
 
-func TestPoolProxyObjectWithFunction(t *testing.T) {
+func TestPoolFunctionWithWeirdScope(t *testing.T) {
 
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
 
-
 	p := &person{"bob"}
-	math := cx.DefineObject("math", p)
+	math, _ := cx.DefineObject("math", p)
 
 	math.DefineFunction("add", p.add)
 
 	var i int
-	err := cx.Eval(`var m = math; (function(math){ return math.add(1,2) })(m)`, &i)
+	err := cx.Eval(`math.add2 = function(){ return math.add.apply(math, [1,2]) }; math.add2()`, &i)
 	if err != nil {
 		t.Fatal(err)
 	}
