@@ -38,9 +38,9 @@ cx := jsapi.NewContext()
 cx.DefineObject("person", p) // p's public fields exposed
 
 var name string
-cx.Eval(`person.Name`, &name) // Read the name from js
+cx.Eval(`person.name`, &name) // Read the name from js
 
-cx.Exec(`person.Name = 'bob'`) // Set the name from js
+cx.Exec(`person.name = 'bob'`) // Set the name from js
 ```
 
 #### Use a Pool of worker contexts

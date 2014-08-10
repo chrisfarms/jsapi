@@ -247,7 +247,7 @@ func TestPoolObjectProperties(t *testing.T) {
 	cx.DefineObject("o", person)
 
 	var s string
-	err := cx.Eval(`o.Name`, &s)
+	err := cx.Eval(`o.name`, &s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestPoolObjectProperties(t *testing.T) {
 		t.Fatalf(`expected to get value of person.Name (%q) from js but got %q`, person.Name, s)
 	}
 
-	err = cx.Exec(`o.Name = "geoff"`)
+	err = cx.Exec(`o.name = "geoff"`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestPoolObjectProperties(t *testing.T) {
 	}
 
 	var i int
-	err = cx.Eval(`o.Age`, &i)
+	err = cx.Eval(`o.age`, &i)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestPoolObjectProperties(t *testing.T) {
 		t.Fatalf(`expected to get value of person.Age (%d) from js but got %v`, person.Age, i)
 	}
 
-	err = cx.Exec(`o.Age = 25`)
+	err = cx.Exec(`o.age = 25`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"strings"
 	"reflect"
 	"runtime"
 	"unsafe"
@@ -441,8 +442,9 @@ func (cx *Context) defineObject(name string, proxy interface{}, id int) (o *Obje
 				if f.PkgPath != "" {
 					continue
 				}
-				o.props[f.Name] = &prop{f.Name, fv, f.Type}
-				cpropname := C.CString(f.Name)
+				name := strings.ToLower(f.Name[0:1]) + f.Name[1:(len(f.Name))]
+				o.props[name] = &prop{name, fv, f.Type}
+				cpropname := C.CString(name)
 				defer C.free(unsafe.Pointer(cpropname))
 				if C.JSAPI_DefineProperty(ptr, C.uint32_t(o.id), cpropname) != C.JSAPI_OK {
 					err = fmt.Errorf("failed to define property")

@@ -23,11 +23,11 @@ func ExampleContext_DefineObject_Proxy() {
 
 	// Read the name from javascript
 	var name string
-	cx.Eval(`person.Name`, &name)
+	cx.Eval(`person.name`, &name)
 	fmt.Println("Read name from js as:", name)
 
 	// Set the name from javascript
-	cx.Exec(`person.Name = 'bob'`)
+	cx.Exec(`person.name = 'bob'`)
 	fmt.Println("Set name from js to:", p.Name)
 	// Output:
 	// Read name from js as: jeff
