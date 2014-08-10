@@ -164,6 +164,9 @@ func (p *Pool) ExecFrom(r io.Reader) (err error) {
 // Attempting to use a pool after it has been destroyed will cause
 // a runtime panic.
 func (p *Pool) Destroy() {
+	if !p.Valid {
+		return
+	}
 	close(p.in)
 	p.Valid = false
 	p.cxs = nil
