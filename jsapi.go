@@ -347,6 +347,8 @@ func (cx *Context) exec(source string, filename string) (err error) {
 // Execute javascript source in Context and scan the response into result.
 // Scanning follows the rules of json.Unmarshal so most go native types are
 // supported and complex javascript objects can be scanned by referancing structs.
+// The special jsapi.Raw string type can be used if you just the output as a JSON
+// string.
 func (cx *Context) Eval(source string, result interface{}) (err error) {
 	cx.do(func(ptr *C.JSAPIContext) {
 		// alloc C-string
@@ -368,7 +370,11 @@ func (cx *Context) Eval(source string, result interface{}) (err error) {
 		defer C.free(unsafe.Pointer(jsonData))
 		// convert to go
 		b := []byte(C.GoStringN(jsonData, jsonLen))
-		err = json.Unmarshal(b, result)
+		if raw, ok := result.(*Raw); ok {
+			*raw = Raw(string(b))
+		} else {
+			err = json.Unmarshal(b, result)
+		}
 	})
 	return err
 }

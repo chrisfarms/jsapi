@@ -497,7 +497,7 @@ func TestStructArgsValue(t *testing.T) {
 
 }
 
-func TestRawType(t *testing.T) {
+func TestRawReturnType(t *testing.T) {
 
 	cx := NewContext()
 	defer cx.Destroy()
@@ -516,6 +516,23 @@ func TestRawType(t *testing.T) {
 
 	if !res.Ok {
 		t.Fatalf("expected to return raw json and have it converted")
+	}
+
+}
+
+func TestRawEval(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	var res Raw
+	err := cx.Eval(`(function(){ return {a:1, b:2} })()`, &res)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res != `{"a":1,"b":2}` {
+		t.Fatalf("expected to return raw json from eval")
 	}
 
 }
