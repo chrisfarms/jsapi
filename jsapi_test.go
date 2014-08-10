@@ -119,6 +119,28 @@ func TestObjectWithIntFunction(t *testing.T) {
 
 }
 
+func TestObjectApplyFunction(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	math := cx.DefineObject("math", nil)
+
+	math.DefineFunction("add", func(a int, b int) int {
+		return a + b
+	})
+
+	var i int
+	err := cx.Eval(`math.add.apply(math,[1,2])`, &i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i != 3 {
+		t.Fatalf("expected math.add.apply(math, [1,2]) to return 3 but got %d", i)
+	}
+
+}
+
 func TestNestedObjects(t *testing.T) {
 
 	cx := NewContext()

@@ -124,29 +124,28 @@ func workerFail(id C.int, err *C.char) {
 
 //export callFunction
 func callFunction(c *C.JSAPIContext, id *C.JSObject, cname *C.char, args *C.char, argn C.int, out **C.char) C.int {
+	name := C.GoString(cname)
 	cx, ok := contexts[int(c.id)]
 	if !ok {
-		*out = C.CString("attempt to use context after destroyed")
+		*out = C.CString(fmt.Sprintf("attempt to call function %s on a destroyed context", name))
 		return 0
 	}
-	name := C.GoString(cname)
 	var fn *function
 	if id == c.o {
 		fn, ok = cx.funcs[name]
 		if !ok {
-			*out = C.CString("attempt to use global func that doesn't appear to exist")
+			*out = C.CString(fmt.Sprintf("attempt to call global function %s that doesn't appear to exist",name))
 			return 0
 		}
 	} else {
 		o, ok := cx.objs[id]
 		if !ok {
-			fmt.Println("obj=", id)
-			*out = C.CString("attempt to use global object that doesn't appear to exist")
+			*out = C.CString(fmt.Sprintf("attempt to call function %s on global object that doesn't appear to exist", name))
 			return 0
 		}
 		fn, ok = o.funcs[name]
 		if !ok {
-			*out = C.CString("attempt to use func that doesn't appear to exist")
+			*out = C.CString(fmt.Sprintf("attempt to call function %s that doesn't appear to exist",name))
 			return 0
 		}
 	}
