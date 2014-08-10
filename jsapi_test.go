@@ -324,6 +324,28 @@ func TestObjectProperties(t *testing.T) {
 
 }
 
+func TestProxyObjectWithUnexportedField(t *testing.T) {
+
+	type Person struct {
+		name string
+		age  int
+	}
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	person := &Person{"jeff", 22}
+
+	cx.DefineObject("o", person)
+
+	var o interface{}
+	err := cx.Eval(`o`, &o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+
 func TestOneContextManyGoroutines(t *testing.T) {
 
 	if testing.Short() {

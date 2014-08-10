@@ -438,6 +438,9 @@ func (cx *Context) defineObject(name string, proxy interface{}, id int) (o *Obje
 			for i := 0; i < ot.NumField(); i++ {
 				f := ot.Field(i)
 				fv := ov.Field(i)
+				if f.PkgPath != "" {
+					continue
+				}
 				o.props[f.Name] = &prop{f.Name, fv, f.Type}
 				cpropname := C.CString(f.Name)
 				defer C.free(unsafe.Pointer(cpropname))
