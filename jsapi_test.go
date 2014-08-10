@@ -119,6 +119,32 @@ func TestObjectWithIntFunction(t *testing.T) {
 
 }
 
+func TestProxyObjectWithFunction(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+
+	type person struct {
+		Name string
+	}
+	p := &person{"bob"}
+	math := cx.DefineObject("math", p)
+
+	math.DefineFunction("add", func(a int, b int) int {
+		return a + b
+	})
+
+	var i int
+	err := cx.Eval(`var m = math; (function(math){ return math.add(1,2) })(m)`, &i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i != 3 {
+		t.Fatalf("expected math.add(1,2) (on proxy onject) to return 3 but got %d", i)
+	}
+
+}
+
 func TestObjectApplyFunction(t *testing.T) {
 
 	cx := NewContext()

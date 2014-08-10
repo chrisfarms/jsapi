@@ -295,6 +295,8 @@ func (cx *Context) getError(filename string) *ErrorReport {
 	return nil
 }
 
+// Teardown the context. It is an error to use a context after
+// it is destroyed.
 func (cx *Context) Destroy() {
 	if cx.Valid {
 		close(cx.in)
@@ -304,10 +306,13 @@ func (cx *Context) Destroy() {
 
 // Execute javascript source in Context and discard any response
 func (cx *Context) Exec(source string) (err error) {
+	return cx.exec(source, "eval")
+}
+
+func (cx *Context) exec(source string, filename string) (err error) {
 	cx.do(func(ptr *C.JSAPIContext) {
 		csource := C.CString(source)
 		defer C.free(unsafe.Pointer(csource))
-		filename := "eval"
 		cfilename := C.CString(filename)
 		defer C.free(unsafe.Pointer(cfilename))
 		// eval
@@ -353,11 +358,15 @@ func (cx *Context) Eval(source string, result interface{}) (err error) {
 
 // Execute javascript in the context from an io.Reader.
 func (cx *Context) ExecFrom(r io.Reader) (err error) {
+	return cx.execFrom(r, "ExecFrom")
+}
+
+func (cx *Context) execFrom(r io.Reader, filename string) (err error) {
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
 		return
 	}
-	return cx.Exec(string(b))
+	return cx.exec(string(b), filename)
 }
 
 // Execute javascript in the context from a file
@@ -367,7 +376,7 @@ func (cx *Context) ExecFile(filename string) (err error) {
 		return err
 	}
 	defer f.Close()
-	return cx.ExecFrom(f)
+	return cx.execFrom(f, filename)
 }
 
 // Define a javascript object in the Context.

@@ -398,3 +398,33 @@ func TestPoolDeadlockCondition(t *testing.T) {
 	}
 
 }
+
+type person struct {
+	Name string
+}
+
+func (p *person) add(a,b int) int {
+	return a + b
+}
+
+func TestPoolProxyObjectWithFunction(t *testing.T) {
+
+	cx := NewPool(POOL_SIZE)
+	defer cx.Destroy()
+
+
+	p := &person{"bob"}
+	math := cx.DefineObject("math", p)
+
+	math.DefineFunction("add", p.add)
+
+	var i int
+	err := cx.Eval(`var m = math; (function(math){ return math.add(1,2) })(m)`, &i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i != 3 {
+		t.Fatalf("expected math.add(1,2) (on proxy onject) to return 3 but got %d", i)
+	}
+
+}
