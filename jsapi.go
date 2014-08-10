@@ -2,7 +2,7 @@
 package jsapi
 
 /*
-#cgo LDFLAGS: -L./lib -L./lib/moz/js/src/build-release/dist/lib -ljsapi -l:libjs.a -lpthread -lstdc++ -ldl -l:libnspr4.a
+#cgo LDFLAGS: -L./lib -L./src/github.com/jsapi/lib -L./src/github.com/jaspi/lib/moz/js/src/build-release/dist/lib -L./lib/moz/js/src/build-release/dist/lib -ljsapi -l:libjs.a -lpthread -lstdc++ -ldl -l:libnspr4.a
 #include <stdlib.h>
 #include "lib/js.hpp"
 void Init();

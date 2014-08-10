@@ -14,7 +14,7 @@ if [[ ! -e "${LIB}/libjs.a" ]]; then (
 	autoconf && 
 	mkdir -p $MOZBUILD && 
 	cd $MOZBUILD &&
-	../configure --disable-shared-js --enable-nspr-build --enable-debug &&
+	../configure --prefix=$out --disable-shared-js --enable-nspr-build --enable-debug &&
 	make &&
 	mv $(readlink -f dist/lib/libjs_static.a) ../../../../libjs.a
 ) fi
@@ -35,6 +35,8 @@ if [[ ! -e "${LIB}/libjsapi.a" ]]; then (
 ) fi
 
 go test -short
+go build
+go install
 
 
 #c++ -o Unified_cpp_js_src_shell0.o -c  
