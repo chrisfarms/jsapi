@@ -427,7 +427,7 @@ func TestExecFile(t *testing.T) {
 
 	cx := NewContext()
 	defer cx.Destroy()
-	if err := cx.ExecFile("./jsapi_test.js"); err != nil {
+	if err := cx.ExecFile("./jsapi_test1.js"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -436,7 +436,17 @@ func TestExecFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !ok {
-		t.Fatalf("expected test() function from jsapi_test.js file to return true got false")
+		t.Fatalf("expected test() function from jsapi_test1.js file to return true got false")
+	}
+
+}
+
+func TestExecFileErrors(t *testing.T) {
+
+	cx := NewContext()
+	defer cx.Destroy()
+	if err := cx.ExecFile("./jsapi_test2.js"); err == nil {
+		t.Fatal("expected to throw error")
 	}
 
 }
@@ -558,3 +568,4 @@ func TestRawEval(t *testing.T) {
 	}
 
 }
+

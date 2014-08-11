@@ -363,7 +363,7 @@ func TestPoolExecFile(t *testing.T) {
 
 	cx := NewPool(POOL_SIZE)
 	defer cx.Destroy()
-	if err := cx.ExecFileAll("./jsapi_test.js"); err != nil {
+	if err := cx.ExecFileAll("./jsapi_test1.js"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -372,7 +372,7 @@ func TestPoolExecFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !ok {
-		t.Fatalf("expected test() function from jsapi_test.js file to return true got false")
+		t.Fatalf("expected test() function from jsapi_test1.js file to return true got false")
 	}
 
 }

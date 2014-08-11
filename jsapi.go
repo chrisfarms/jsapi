@@ -216,6 +216,9 @@ type ErrorReport struct {
 }
 
 func (err *ErrorReport) Error() string {
+	if err == nil {
+		return "nil *ErrorReport bug"
+	}
 	return fmt.Sprintf("%s:%d %s", err.Filename, err.Line, err.Message)
 }
 
@@ -253,7 +256,7 @@ type Context struct {
 	objs  map[int]*Object
 	funcs map[int]*function
 	Valid bool
-	errs  map[string]*ErrorReport
+	err  *ErrorReport
 }
 
 // Create a context to execute javascript in.
@@ -290,10 +293,7 @@ func NewContext() *Context {
 // The javascript side ends up calling this when an uncaught
 // exception manages to bubble to the top.
 func (cx *Context) setError(filename string, line uint, message string) {
-	if cx.errs == nil {
-		cx.errs = make(map[string]*ErrorReport)
-	}
-	cx.errs[filename] = &ErrorReport{
+	cx.err = &ErrorReport{
 		Filename: filename,
 		Line:     line,
 		Message:  message,
@@ -301,19 +301,10 @@ func (cx *Context) setError(filename string, line uint, message string) {
 }
 
 // fetch an error for an eval filename and remove it from the pile
-func (cx *Context) getError(filename string) *ErrorReport {
-	if cx.errs == nil {
-		return nil
-	}
-	if err, ok := cx.errs[filename]; ok && err != nil {
-		delete(cx.errs, filename)
-		return err
-	}
-	if err, ok := cx.errs["__fatal__"]; ok && err != nil {
-		delete(cx.errs, filename)
-		return err
-	}
-	return nil
+func (cx *Context) getError(filename string) (err error) {
+	err = cx.err
+	cx.err = nil
+	return err
 }
 
 // Teardown the context. It is an error to use a context after
@@ -338,10 +329,7 @@ func (cx *Context) exec(source string, filename string) (err error) {
 		defer C.free(unsafe.Pointer(cfilename))
 		// eval
 		if C.JSAPI_Eval(ptr, csource, cfilename) != C.JSAPI_OK {
-			if err = cx.getError(filename); err != nil {
-				return
-			}
-			err = fmt.Errorf("Failed to exec javascript and no error report found")
+			err = cx.getError(filename)
 			return
 		}
 	})
@@ -365,10 +353,7 @@ func (cx *Context) Eval(source string, result interface{}) (err error) {
 		defer C.free(unsafe.Pointer(cfilename))
 		// eval
 		if C.JSAPI_EvalJSON(ptr, csource, cfilename, &jsonData, &jsonLen) != C.JSAPI_OK {
-			if err = cx.getError(filename); err != nil {
-				return
-			}
-			err = fmt.Errorf("Failed to eval javascript and no error report found")
+			err = cx.getError(filename)
 			return
 		}
 		defer C.free(unsafe.Pointer(jsonData))
