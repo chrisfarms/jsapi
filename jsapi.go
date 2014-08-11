@@ -14,9 +14,9 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"strings"
 	"reflect"
 	"runtime"
+	"strings"
 	"unsafe"
 )
 
@@ -302,11 +302,14 @@ func (cx *Context) setError(filename string, line uint, message string) {
 
 // fetch an error for an eval filename and remove it from the pile
 func (cx *Context) getError(filename string) *ErrorReport {
-	if err, ok := cx.errs[filename]; ok {
+	if cx.errs == nil {
+		return nil
+	}
+	if err, ok := cx.errs[filename]; ok && err != nil {
 		delete(cx.errs, filename)
 		return err
 	}
-	if err, ok := cx.errs["__fatal__"]; ok {
+	if err, ok := cx.errs["__fatal__"]; ok && err != nil {
 		delete(cx.errs, filename)
 		return err
 	}
