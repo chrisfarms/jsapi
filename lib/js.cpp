@@ -373,7 +373,7 @@ jerr JSAPI_Init() {
 		return JSAPI_FAIL;
 	}
     // Create global runtime
-    grt = JS_NewRuntime(2048L * 1024L * 1024L, 0);
+    grt = JS_NewRuntime(1L * 1024L * 1024L * 1024L, 0);
     if (!grt) {
 		return JSAPI_FAIL;
 	}
@@ -480,7 +480,7 @@ static void ContextWorker(void *arg){
 	c.id = input->id;
 	do {
 		// new rt with global parent runtime
-		c.rt = JS_NewRuntime(8L * 1024L * 1024L, 2L * 1024L * 1024L, input->runtime);
+		c.rt = JS_NewRuntime(1L * 1024L * 1024L * 1024L, 2L * 1024L * 1024L, input->runtime);
 		if (!c.rt) {
 			go_worker_fail(c.id, "failed to make global");
 			break;
